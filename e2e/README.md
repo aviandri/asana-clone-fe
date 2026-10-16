@@ -39,6 +39,5 @@ The tests use accessible roles and names, not CSS classes or test ids. The UI mu
 | Task detail | panel | opened by a single click on the title (or `?task=<id>`); `role="dialog"` named by task title |
 | | comment | textbox named `/comment/i` and a button named exactly `Comment` |
 
-Login, shell, list view and task panel are implemented this way (FE#5). Create-project, board and
-the comment box are still contract-only. If the UI ends up differing, update the spec
+All of it is implemented on FE `main`, and the specs use the exact names it ships with. If the UI ends up differing, update the spec
 selectors in the same PR.

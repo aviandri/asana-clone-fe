@@ -11,6 +11,8 @@ import { EmptyState, ErrorState } from '@/components/PageHeader';
 import { FullPageSpinner } from '@/components/Spinner';
 import { canEditProjectContent } from '@/lib/permissions';
 import type { CompletionFilter } from '@/lib/taskFilters';
+import { BoardView } from './BoardView';
+import { CalendarView } from './CalendarView';
 import { ListView } from './ListView';
 
 const VIEWS: { key: Lowercase<ProjectView>; label: string; icon: ReactNode }[] = [
@@ -108,7 +110,7 @@ export function ProjectPage() {
     <div className="flex h-full flex-col">
       <ProjectHeader project={p} />
       <div className="flex items-center gap-2 border-b border-gray-100 px-6 py-2">
-        {canEdit && (
+        {canEdit && view !== 'calendar' && (
           <button
             type="button"
             className="btn-primary py-1"
@@ -139,6 +141,10 @@ export function ProjectPage() {
           <ErrorState error={tasks.error} />
         ) : view === 'list' ? (
           <ListView {...props} />
+        ) : view === 'board' ? (
+          <BoardView {...props} />
+        ) : view === 'calendar' ? (
+          <CalendarView {...props} />
         ) : (
           <EmptyState title={`${view[0].toUpperCase()}${view.slice(1)} view`}>Coming soon.</EmptyState>
         )}

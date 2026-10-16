@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { MenuIcon } from '@/components/icons';
+import { Toaster } from '@/components/Toaster';
 import { TaskPanel } from '@/tasks/TaskPanel';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
 
@@ -48,6 +49,7 @@ export function AppShell() {
           )}
         </div>
       </div>
+      <Toaster />
     </div>
   );
 }

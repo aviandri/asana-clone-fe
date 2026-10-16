@@ -39,6 +39,8 @@ export type UpdateTaskVars = {
   patch: UpdateTaskInput;
   /** Full user object for optimistic display when `patch.assigneeId` is set. */
   assignee?: UserSummary | null;
+  /** Skip the global error toast (the caller shows the error inline). */
+  quiet?: boolean;
 };
 
 export function useUpdateTask() {

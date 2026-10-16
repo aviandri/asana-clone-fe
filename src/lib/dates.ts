@@ -1,4 +1,14 @@
-import { differenceInCalendarDays, format, isSameYear, parseISO } from 'date-fns';
+import {
+  addDays,
+  differenceInCalendarDays,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameYear,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+} from 'date-fns';
 
 /** Parse a `YYYY-MM-DD` date-only string as a *local* date (not UTC midnight). */
 export function parseDateOnly(s: string): Date {
@@ -27,4 +37,13 @@ export function dueTone(s: string | null, completed = false, now = new Date()): 
   if (diff < 0) return 'text-red-600';
   if (diff <= 1) return 'text-green-700';
   return 'text-gray-500';
+}
+
+/** All days shown in a month grid (whole weeks, Sunday start). */
+export function monthGrid(month: Date): Date[] {
+  const start = startOfWeek(startOfMonth(month));
+  const end = endOfWeek(endOfMonth(month));
+  const days: Date[] = [];
+  for (let d = start; d <= end; d = addDays(d, 1)) days.push(d);
+  return days;
 }

@@ -110,7 +110,7 @@ function SubtaskList({ task, canEdit }: { task: TaskDetail; canEdit: boolean }) 
             <AssigneeField
               assignee={s.assignee}
               disabled={!canEdit}
-              onChange={(u) => update.mutateAsync({ id: s.id, patch: { assigneeId: u?.id ?? null }, assignee: u })}
+              onChange={(u) => update.mutateAsync({ id: s.id, patch: { assigneeId: u?.id ?? null }, assignee: u, quiet: true })}
             />
           </li>
         ))}
@@ -339,7 +339,7 @@ export function TaskPanel({ taskId, footer }: { taskId: string; footer?: TaskPan
                 variant="field"
                 assignee={t.assignee}
                 disabled={!canEdit}
-                onChange={(u) => update.mutateAsync({ id: t.id, patch: { assigneeId: u?.id ?? null }, assignee: u })}
+                onChange={(u) => update.mutateAsync({ id: t.id, patch: { assigneeId: u?.id ?? null }, assignee: u, quiet: true })}
               />
             </FieldRow>
             <FieldRow label="Due date">

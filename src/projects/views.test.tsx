@@ -19,7 +19,7 @@ describe('board view', () => {
     expect(screen.getByRole('region', { name: 'In progress' })).toHaveTextContent('Build responsive header');
     expect(screen.getByRole('region', { name: 'Done' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Untitled section' })).toHaveTextContent('Unsorted idea: dark mode');
-    expect(screen.getByRole('link', { name: /board/i })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Board' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('opens the task dialog when a card title is clicked', async () => {

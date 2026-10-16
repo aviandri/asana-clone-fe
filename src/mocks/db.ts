@@ -274,6 +274,10 @@ export function createSeedDb(): MockDb {
       updatedAt: now,
       ...opts,
     };
+    // Spread creation (and completion) over the last ~8 weeks so reports have a real trend.
+    const ageDays = (pos / 1000) * 5 % 56;
+    t.createdAt = new Date(Date.now() - ageDays * 864e5).toISOString();
+    if (t.completed) t.completedAt = new Date(Date.now() - Math.max(0, ageDays - 6) * 864e5).toISOString();
     db.tasks.push(t);
     db.followers.push({ taskId: t.id, userId: t.creatorId });
     if (t.assigneeId && t.assigneeId !== t.creatorId) {

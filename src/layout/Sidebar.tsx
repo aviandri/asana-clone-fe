@@ -10,6 +10,7 @@ import { NewProjectDialog } from '@/projects/NewProjectDialog';
 import { ProfileDialog } from './ProfileDialog';
 import {
   BellIcon,
+  ChartIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -149,6 +150,9 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
         </NavItem>
         <NavItem to="/goals" icon={<TargetIcon />}>
           Goals
+        </NavItem>
+        <NavItem to="/reporting" icon={<ChartIcon />}>
+          Reporting
         </NavItem>
         {user.role === 'ADMIN' && (
           <NavItem to="/admin" icon={<ShieldIcon />}>

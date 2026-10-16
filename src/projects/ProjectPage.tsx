@@ -1,12 +1,12 @@
 import clsx from 'clsx';
-import { useState, type ReactNode } from 'react';
+import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { Navigate, NavLink, useParams } from 'react-router-dom';
 import { ApiError } from '@/api/client';
 import { useProject, useProjectTasks } from '@/api/hooks';
 import type { ProjectDetail, ProjectView, Task } from '@/api/types';
 import { useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
-import { BoardIcon, CalendarIcon, ListIcon, PlusIcon, SettingsIcon } from '@/components/icons';
+import { BoardIcon, CalendarIcon, ChartIcon, ListIcon, PlusIcon, SettingsIcon } from '@/components/icons';
 import { EmptyState, ErrorState } from '@/components/PageHeader';
 import { FullPageSpinner } from '@/components/Spinner';
 import { canEditProjectContent } from '@/lib/permissions';
@@ -16,11 +16,15 @@ import { CalendarView } from './CalendarView';
 import { ListView } from './ListView';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 
-const VIEWS: { key: Lowercase<ProjectView>; label: string; icon: ReactNode }[] = [
+const VIEWS: { key: Lowercase<ProjectView> | 'dashboard'; label: string; icon: ReactNode }[] = [
   { key: 'list', label: 'List', icon: <ListIcon className="h-3.5 w-3.5" /> },
   { key: 'board', label: 'Board', icon: <BoardIcon className="h-3.5 w-3.5" /> },
   { key: 'calendar', label: 'Calendar', icon: <CalendarIcon className="h-3.5 w-3.5" /> },
+  { key: 'dashboard', label: 'Dashboard', icon: <ChartIcon className="h-3.5 w-3.5" /> },
 ];
+
+// Recharts is only needed on the dashboard — keep it out of the main bundle.
+const ProjectDashboard = lazy(() => import('@/reporting/ProjectDashboard'));
 
 export type ProjectViewProps = {
   project: ProjectDetail;
@@ -128,6 +132,7 @@ export function ProjectPage() {
   return (
     <div className="flex h-full flex-col">
       <ProjectHeader project={p} />
+      {view !== 'dashboard' && (
       <div className="flex items-center gap-2 border-b border-gray-100 px-6 py-2">
         {canEdit && view !== 'calendar' && (
           <button
@@ -153,6 +158,7 @@ export function ProjectPage() {
           </select>
         </label>
       </div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto">
         {tasks.isLoading ? (
           <FullPageSpinner />
@@ -164,6 +170,10 @@ export function ProjectPage() {
           <BoardView {...props} />
         ) : view === 'calendar' ? (
           <CalendarView {...props} />
+        ) : view === 'dashboard' ? (
+          <Suspense fallback={<FullPageSpinner />}>
+            <ProjectDashboard projectId={p.id} />
+          </Suspense>
         ) : (
           <EmptyState title={`${view[0].toUpperCase()}${view.slice(1)} view`}>Coming soon.</EmptyState>
         )}

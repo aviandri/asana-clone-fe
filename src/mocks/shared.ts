@@ -36,7 +36,8 @@ export type Ctx = {
   body: any;
   me: UserRow | null;
 };
-export type Result = { status: number; body?: unknown };
+/** `raw` responses (e.g. CSV) bypass JSON encoding. */
+export type Result = { status: number; body?: unknown; raw?: string; contentType?: string; filename?: string };
 export type Handler = (ctx: Ctx) => Result | unknown;
 
 export const nowIso = () => new Date().toISOString();

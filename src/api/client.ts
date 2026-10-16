@@ -88,3 +88,12 @@ export const http = {
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, { body }),
   delete: <T = void>(path: string) => request<T>('DELETE', path),
 };
+
+/** Fetch a non-JSON resource (e.g. a CSV export) through the configured transport. */
+export async function requestBlob(path: string): Promise<{ blob: Blob; filename: string | null }> {
+  const res = await fetchImpl(`${API_BASE}${path}`, { method: 'GET', credentials: 'include' });
+  if (!res.ok) throw new ApiError(res.status, res.status === 401 ? 'UNAUTHORIZED' : 'INTERNAL', res.statusText || 'Download failed');
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? null;
+  return { blob: await res.blob(), filename };
+}

@@ -183,3 +183,135 @@ export type UpdateTaskInput = Partial<{
   completed: boolean;
   position: number;
 }>;
+
+// ---- Goals / OKRs (SPEC §10, v1.1) ----
+
+export type GoalStatus =
+  | 'NO_STATUS'
+  | 'ON_TRACK'
+  | 'AT_RISK'
+  | 'OFF_TRACK'
+  | 'ACHIEVED'
+  | 'PARTIAL'
+  | 'MISSED'
+  | 'DROPPED';
+export type ProgressSource = 'KEY_RESULTS' | 'SUB_GOALS' | 'PROJECTS' | 'MANUAL';
+export type MetricType = 'NUMBER' | 'PERCENT' | 'CURRENCY' | 'BOOLEAN';
+
+export type Goal = {
+  id: string;
+  title: string;
+  description: string | null;
+  owner: UserSummary;
+  team: { id: string; name: string } | null;
+  isCompany: boolean;
+  parentId: string | null;
+  /** `YYYY` | `YYYY-H1|H2` | `YYYY-Q1..Q4` */
+  timePeriod: string;
+  status: GoalStatus;
+  progressSource: ProgressSource;
+  /** 0–100, computed by the server */
+  progress: number;
+  weight: number;
+  keyResultCount: number;
+  childCount: number;
+  canEdit: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type KeyResult = {
+  id: string;
+  goalId: string;
+  title: string;
+  metricType: MetricType;
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  unit: string | null;
+  owner: UserSummary | null;
+  progress: number;
+  position: number;
+  updatedAt: string;
+};
+
+export type GoalUpdate = {
+  id: string;
+  goalId: string;
+  author: UserSummary;
+  status: GoalStatus;
+  progress: number;
+  body: string | null;
+  createdAt: string;
+};
+
+export type GoalDetail = Goal & {
+  parent: { id: string; title: string } | null;
+  keyResults: KeyResult[];
+  children: Goal[];
+  projects: { project: TaskProjectRef; total: number; completed: number }[];
+  hiddenProjectCount: number;
+  latestUpdate: GoalUpdate | null;
+};
+
+export type CreateGoalInput = {
+  title: string;
+  timePeriod: string;
+  description?: string | null;
+  ownerId?: string;
+  teamId?: string | null;
+  isCompany?: boolean;
+  parentId?: string | null;
+  progressSource?: ProgressSource;
+  weight?: number;
+};
+export type UpdateGoalInput = Partial<{
+  title: string;
+  description: string | null;
+  ownerId: string;
+  teamId: string | null;
+  isCompany: boolean;
+  parentId: string | null;
+  timePeriod: string;
+  status: GoalStatus;
+  progressSource: ProgressSource;
+  manualProgress: number;
+  weight: number;
+}>;
+export type CreateKeyResultInput = {
+  title: string;
+  metricType: MetricType;
+  startValue?: number;
+  targetValue: number;
+  currentValue?: number;
+  unit?: string | null;
+  ownerId?: string | null;
+  position?: number;
+};
+export type UpdateKeyResultInput = Partial<CreateKeyResultInput>;
+
+// ---- Reporting (SPEC §11, v1.1) ----
+
+export type Counts = { total: number; completed: number; incomplete: number; overdue: number };
+
+export type ProjectReport = {
+  project: TaskProjectRef;
+  totals: Counts & { unassigned: number; percentComplete: number };
+  bySection: { sectionId: string | null; name: string; total: number; completed: number; overdue: number }[];
+  byAssignee: { assignee: UserSummary | null; incomplete: number; completed: number; overdue: number }[];
+  byPriority: { priority: Priority; total: number; incomplete: number }[];
+  /** oldest → newest; `open` = incomplete at week end */
+  trend: { weekStart: string; created: number; completed: number; open: number }[];
+  upcoming: Task[];
+};
+
+export type OverviewReport = {
+  totals: Counts & { projects: number };
+  projects: (Counts & { project: Project; percentComplete: number; lastActivityAt: string | null })[];
+};
+
+export type WorkloadReport = {
+  from: string;
+  to: string;
+  data: { user: UserSummary; open: number; overdue: number; dueInRange: number; completedInRange: number }[];
+};

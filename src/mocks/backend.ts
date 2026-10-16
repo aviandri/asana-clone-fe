@@ -2,216 +2,41 @@
 // backend isn't available (VITE_MOCK=true) and in tests. Not meant to be exhaustive — just
 // faithful enough that the UI can be developed and tested against it.
 import type {
-  ErrorCode,
   Invite,
   Notification,
-  Project,
-  ProjectDetail,
   Story,
-  Task,
-  TaskDetail,
-  Team,
-  TeamDetail,
-  User,
-  UserSummary,
 } from '@/api/types';
+import { goalRoutes } from './goals';
 import { uid, type MockDb, type ProjectRow, type TaskRow, type UserRow } from './db';
 
-class HttpError extends Error {
-  constructor(
-    public status: number,
-    public code: ErrorCode,
-    message: string,
-    public details?: unknown,
-  ) {
-    super(message);
-  }
-}
-
-const notFound = () => new HttpError(404, 'NOT_FOUND', 'Not found');
-const forbidden = () => new HttpError(403, 'FORBIDDEN', 'Forbidden');
-const invalid = (msg: string) => new HttpError(400, 'VALIDATION', msg);
-
-type Ctx = {
-  db: MockDb;
-  method: string;
-  params: Record<string, string>;
-  query: URLSearchParams;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  body: any;
-  me: UserRow | null;
-};
-type Result = { status: number; body?: unknown };
-type Handler = (ctx: Ctx) => Result | unknown;
-
-const nowIso = () => new Date().toISOString();
-
-// ---------- serializers ----------
-
-const summary = (u: UserRow): UserSummary => ({
-  id: u.id,
-  name: u.name,
-  email: u.email,
-  avatarColor: u.avatarColor,
-});
-const fullUser = (u: UserRow): User => ({ ...summary(u), role: u.role, isActive: u.isActive, createdAt: u.createdAt });
-const userById = (db: MockDb, id: string) => {
-  const u = db.users.find((x) => x.id === id);
-  if (!u) throw notFound();
-  return u;
-};
-
-function serializeTeam(db: MockDb, t: MockDb['teams'][number]): Team {
-  return {
-    ...t,
-    memberCount: db.teamMembers.filter((m) => m.teamId === t.id).length,
-  };
-}
-function serializeTeamDetail(db: MockDb, t: MockDb['teams'][number]): TeamDetail {
-  return {
-    ...serializeTeam(db, t),
-    members: db.teamMembers
-      .filter((m) => m.teamId === t.id)
-      .map((m) => summary(userById(db, m.userId))),
-  };
-}
-
-function serializeProject(db: MockDb, p: ProjectRow, me: UserRow): Project {
-  const membership = db.projectMembers.find((m) => m.projectId === p.id && m.userId === me.id);
-  return {
-    id: p.id,
-    teamId: p.teamId,
-    name: p.name,
-    description: p.description,
-    color: p.color,
-    privacy: p.privacy,
-    archived: p.archived,
-    defaultView: p.defaultView,
-    owner: summary(userById(db, p.ownerId)),
-    createdAt: p.createdAt,
-    updatedAt: p.updatedAt,
-    myRole: membership?.role ?? null,
-  };
-}
-function serializeProjectDetail(db: MockDb, p: ProjectRow, me: UserRow): ProjectDetail {
-  const team = db.teams.find((t) => t.id === p.teamId)!;
-  return {
-    ...serializeProject(db, p, me),
-    sections: db.sections
-      .filter((s) => s.projectId === p.id)
-      .sort((a, b) => a.position - b.position),
-    members: db.projectMembers
-      .filter((m) => m.projectId === p.id)
-      .map((m) => ({ user: summary(userById(db, m.userId)), role: m.role })),
-    team: { id: team.id, name: team.name },
-  };
-}
-
-function serializeTask(db: MockDb, t: TaskRow): Task {
-  const subs = db.tasks.filter((s) => s.parentId === t.id);
-  const project = t.projectId ? db.projects.find((p) => p.id === t.projectId) : null;
-  return {
-    id: t.id,
-    projectId: t.projectId,
-    sectionId: t.sectionId,
-    parentId: t.parentId,
-    title: t.title,
-    description: t.description,
-    assignee: t.assigneeId ? summary(userById(db, t.assigneeId)) : null,
-    creator: summary(userById(db, t.creatorId)),
-    dueDate: t.dueDate,
-    startDate: t.startDate,
-    priority: t.priority,
-    completed: t.completed,
-    completedAt: t.completedAt,
-    position: t.position,
-    subtaskCount: subs.length,
-    completedSubtaskCount: subs.filter((s) => s.completed).length,
-    commentCount: db.comments.filter((c) => c.taskId === t.id).length,
-    project: project ? { id: project.id, name: project.name, color: project.color } : null,
-    createdAt: t.createdAt,
-    updatedAt: t.updatedAt,
-  };
-}
-function serializeTaskDetail(db: MockDb, t: TaskRow): TaskDetail {
-  const parent = t.parentId ? db.tasks.find((p) => p.id === t.parentId) : null;
-  return {
-    ...serializeTask(db, t),
-    followers: db.followers
-      .filter((f) => f.taskId === t.id)
-      .map((f) => summary(userById(db, f.userId))),
-    subtasks: db.tasks
-      .filter((s) => s.parentId === t.id)
-      .sort((a, b) => a.position - b.position)
-      .map((s) => serializeTask(db, s)),
-    parent: parent ? { id: parent.id, title: parent.title } : null,
-  };
-}
-
-// ---------- permissions ----------
-
-function canSeeProject(db: MockDb, p: ProjectRow, me: UserRow) {
-  if (me.role === 'ADMIN' || p.privacy === 'PUBLIC') return true;
-  if (db.projectMembers.some((m) => m.projectId === p.id && m.userId === me.id)) return true;
-  if (p.privacy === 'TEAM') {
-    return db.teamMembers.some((m) => m.teamId === p.teamId && m.userId === me.id);
-  }
-  return false;
-}
-function visibleProject(db: MockDb, id: string, me: UserRow) {
-  const p = db.projects.find((x) => x.id === id);
-  if (!p || !canSeeProject(db, p, me)) throw notFound();
-  return p;
-}
-function assertCanEditProjectContent(db: MockDb, p: ProjectRow, me: UserRow) {
-  if (me.role === 'ADMIN') return;
-  const m = db.projectMembers.find((x) => x.projectId === p.id && x.userId === me.id);
-  if (m?.role === 'COMMENTER') throw forbidden();
-}
-function assertProjectOwner(db: MockDb, p: ProjectRow, me: UserRow) {
-  if (me.role === 'ADMIN') return;
-  const m = db.projectMembers.find((x) => x.projectId === p.id && x.userId === me.id);
-  if (m?.role !== 'OWNER') throw forbidden();
-}
-function canSeeTask(db: MockDb, t: TaskRow, me: UserRow): boolean {
-  if (t.projectId) {
-    const p = db.projects.find((x) => x.id === t.projectId);
-    return !!p && canSeeProject(db, p, me);
-  }
-  if (me.role === 'ADMIN') return true;
-  return (
-    t.creatorId === me.id ||
-    t.assigneeId === me.id ||
-    db.followers.some((f) => f.taskId === t.id && f.userId === me.id)
-  );
-}
-function visibleTask(db: MockDb, id: string, me: UserRow) {
-  const t = db.tasks.find((x) => x.id === id);
-  if (!t || !canSeeTask(db, t, me)) throw notFound();
-  return t;
-}
-function assertCanEditTask(db: MockDb, t: TaskRow, me: UserRow) {
-  if (!t.projectId) return;
-  assertCanEditProjectContent(db, db.projects.find((p) => p.id === t.projectId)!, me);
-}
-/** 400 VALIDATION when `user` couldn't see the task's project (assigning / adding followers). */
-function assertCanSeeTaskProject(db: MockDb, t: TaskRow, user: UserRow, field: string) {
-  if (!t.projectId) return;
-  const p = db.projects.find((x) => x.id === t.projectId)!;
-  if (!canSeeProject(db, p, user)) {
-    const message = `${user.name} doesn’t have access to this project`;
-    // Same shape as the BE (zod issues): [{ path: [field], message }]
-    throw new HttpError(400, 'VALIDATION', message, [{ path: [field], message }]);
-  }
-}
-
-function assertNotLastOwner(db: MockDb, projectId: string) {
-  const owners = db.projectMembers.filter((m) => m.projectId === projectId && m.role === 'OWNER');
-  if (owners.length <= 1) throw new HttpError(409, 'CONFLICT', 'A project must keep at least one owner');
-}
-const requireAdmin = (me: UserRow) => {
-  if (me.role !== 'ADMIN') throw forbidden();
-};
+import {
+  HttpError,
+  notFound,
+  forbidden,
+  invalid,
+  nowIso,
+  summary,
+  fullUser,
+  userById,
+  serializeTeam,
+  serializeTeamDetail,
+  serializeProject,
+  serializeProjectDetail,
+  serializeTask,
+  serializeTaskDetail,
+  canSeeProject,
+  visibleProject,
+  assertCanEditProjectContent,
+  assertProjectOwner,
+  canSeeTask,
+  visibleTask,
+  assertCanEditTask,
+  assertCanSeeTaskProject,
+  assertNotLastOwner,
+  requireAdmin,
+  type Result,
+  type Handler,
+} from './shared';
 
 // ---------- side effects ----------
 
@@ -1048,7 +873,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   ],
 ];
 
-const compiled = routes.map(([method, pattern, handler, opts]) => {
+const compiled = [...routes, ...goalRoutes].map(([method, pattern, handler, opts]) => {
   const keys: string[] = [];
   const re = new RegExp(
     '^' +

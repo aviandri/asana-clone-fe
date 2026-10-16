@@ -13,4 +13,11 @@ export const qk = {
   search: (q: string) => ['search', q] as const,
   adminUsers: ['adminUsers'] as const,
   adminInvites: ['adminInvites'] as const,
+  goals: (filters: { timePeriod?: string } = {}) => ['goals', filters] as const,
+  goal: (id: string) => ['goal', id] as const,
+  goalUpdates: (id: string) => ['goalUpdates', id] as const,
+  timePeriods: ['timePeriods'] as const,
+  projectReport: (id: string, weeks: number) => ['projectReport', id, weeks] as const,
+  overview: (teamId?: string) => ['reportOverview', teamId ?? ''] as const,
+  workload: (q: { teamId?: string; from?: string; to?: string }) => ['reportWorkload', q] as const,
 };

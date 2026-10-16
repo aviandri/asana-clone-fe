@@ -1,7 +1,10 @@
 // In-memory data store for the mock backend. Rows mirror the Prisma model in docs/SPEC.md §3.
 import { addDays, format } from 'date-fns';
 import type {
+  GoalStatus,
+  MetricType,
   NotificationType,
+  ProgressSource,
   Priority,
   Privacy,
   ProjectRole,
@@ -91,6 +94,47 @@ export type NotificationRow = {
   createdAt: string;
 };
 
+export type GoalRow = {
+  id: string;
+  title: string;
+  description: string | null;
+  ownerId: string;
+  isCompany: boolean;
+  teamId: string | null;
+  parentId: string | null;
+  timePeriod: string;
+  status: GoalStatus;
+  progressSource: ProgressSource;
+  manualProgress: number;
+  weight: number;
+  createdAt: string;
+  updatedAt: string;
+};
+export type KeyResultRow = {
+  id: string;
+  goalId: string;
+  title: string;
+  metricType: MetricType;
+  startValue: number;
+  targetValue: number;
+  currentValue: number;
+  unit: string | null;
+  ownerId: string | null;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+};
+export type GoalProjectRow = { goalId: string; projectId: string };
+export type GoalUpdateRow = {
+  id: string;
+  goalId: string;
+  authorId: string;
+  status: GoalStatus;
+  progress: number;
+  body: string | null;
+  createdAt: string;
+};
+
 export type MockDb = {
   /** userId of the "cookie" session, or null when logged out */
   sessionUserId: string | null;
@@ -109,6 +153,11 @@ export type MockDb = {
   comments: CommentRow[];
   activities: ActivityRow[];
   notifications: NotificationRow[];
+  // v1.1 — optional so localStorage DBs saved before goals existed still load.
+  goals?: GoalRow[];
+  keyResults?: KeyResultRow[];
+  goalProjects?: GoalProjectRow[];
+  goalUpdates?: GoalUpdateRow[];
 };
 
 export function uid(db: MockDb, prefix = 'id'): string {
@@ -329,5 +378,93 @@ export function createSeedDb(): MockDb {
     },
   );
 
+  seedGoals(db, { admin, alice, bob, carol, eng, mkt, webProjectId: web.p.id });
   return db;
 }
+
+/** SPEC §10 seed: company goal (SUB_GOALS) → 2 team goals → individual goals with KRs. */
+function seedGoals(
+  db: MockDb,
+  r: { admin: UserRow; alice: UserRow; bob: UserRow; carol: UserRow; eng: TeamRow; mkt: TeamRow; webProjectId: string },
+) {
+  const now = new Date();
+  const iso = now.toISOString();
+  const quarter = `${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`;
+  const year = String(now.getFullYear());
+  db.goals = [];
+  db.keyResults = [];
+  db.goalProjects = [];
+  db.goalUpdates = [];
+  const goal = (g: Partial<GoalRow> & Pick<GoalRow, 'title' | 'ownerId'>) => {
+    const row: GoalRow = {
+      id: uid(db, 'goal'),
+      description: null,
+      isCompany: false,
+      teamId: null,
+      parentId: null,
+      timePeriod: quarter,
+      status: 'NO_STATUS',
+      progressSource: 'KEY_RESULTS',
+      manualProgress: 0,
+      weight: 1,
+      createdAt: iso,
+      updatedAt: iso,
+      ...g,
+    };
+    db.goals!.push(row);
+    return row;
+  };
+  let krPos = 0;
+  const kr = (goalId: string, k: Partial<KeyResultRow> & Pick<KeyResultRow, 'title' | 'targetValue'>) => {
+    krPos += 1000;
+    const row: KeyResultRow = {
+      id: uid(db, 'kres'),
+      goalId,
+      metricType: 'NUMBER',
+      startValue: 0,
+      currentValue: 0,
+      unit: null,
+      ownerId: null,
+      position: krPos,
+      createdAt: iso,
+      updatedAt: iso,
+      ...k,
+    };
+    db.keyResults!.push(row);
+    return row;
+  };
+
+  const company = goal({
+    title: 'Become the go-to tool for internal planning',
+    description: 'Company objective for the quarter.',
+    ownerId: r.admin.id,
+    isCompany: true,
+    progressSource: 'SUB_GOALS',
+    status: 'ON_TRACK',
+  });
+  const engGoal = goal({ title: 'Ship a delightful v1.1', ownerId: r.alice.id, teamId: r.eng.id, parentId: company.id, progressSource: 'SUB_GOALS', weight: 2, status: 'ON_TRACK' });
+  const mktGoal = goal({ title: 'Grow internal adoption', ownerId: r.carol.id, teamId: r.mkt.id, parentId: company.id, status: 'AT_RISK' });
+  kr(mktGoal.id, { title: 'Weekly active users', targetValue: 80, startValue: 20, currentValue: 41, ownerId: r.carol.id });
+  kr(mktGoal.id, { title: 'Teams onboarded', metricType: 'PERCENT', targetValue: 100, currentValue: 35, unit: '%' });
+
+  const web = goal({ title: 'Launch the redesigned website', ownerId: r.admin.id, parentId: engGoal.id, progressSource: 'PROJECTS', status: 'ON_TRACK' });
+  db.goalProjects!.push({ goalId: web.id, projectId: r.webProjectId });
+  const perf = goal({ title: 'Make the app fast', ownerId: r.bob.id, parentId: engGoal.id, status: 'OFF_TRACK' });
+  kr(perf.id, { title: 'p95 page load (ms)', startValue: 2400, targetValue: 1200, currentValue: 2000, unit: 'ms', ownerId: r.bob.id });
+  kr(perf.id, { title: 'Lighthouse score', metricType: 'PERCENT', targetValue: 90, startValue: 60, currentValue: 72, unit: '%' });
+  const docs = goal({ title: 'Publish API docs', ownerId: r.alice.id, parentId: engGoal.id });
+  kr(docs.id, { title: 'Docs site live', metricType: 'BOOLEAN', targetValue: 1, ownerId: r.alice.id });
+  kr(docs.id, { title: 'Endpoints documented', targetValue: 40, currentValue: 12 });
+
+  goal({ title: 'Cut infra spend', ownerId: r.admin.id, isCompany: true, timePeriod: year, progressSource: 'MANUAL', manualProgress: 30 });
+  const budget = goal({ title: 'Stay within marketing budget', ownerId: r.carol.id, teamId: r.mkt.id, timePeriod: year });
+  kr(budget.id, { title: 'Spend', metricType: 'CURRENCY', startValue: 0, targetValue: 50000, currentValue: 18000, unit: 'USD' });
+
+  const ago = (days: number) => new Date(now.getTime() - days * 864e5).toISOString();
+  db.goalUpdates!.push(
+    { id: uid(db, 'gupd'), goalId: perf.id, authorId: r.bob.id, status: 'AT_RISK', progress: 20, body: 'Bundle split landed; images next.', createdAt: ago(9) },
+    { id: uid(db, 'gupd'), goalId: perf.id, authorId: r.bob.id, status: 'OFF_TRACK', progress: 25.6, body: 'Blocked on CDN contract.', createdAt: ago(2) },
+    { id: uid(db, 'gupd'), goalId: company.id, authorId: r.admin.id, status: 'ON_TRACK', progress: 30, body: null, createdAt: ago(5) },
+  );
+}
+

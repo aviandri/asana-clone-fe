@@ -45,6 +45,7 @@ describe('auth flow', () => {
       invitedById: db.users[0].id,
       expiresAt: new Date(Date.now() + 864e5).toISOString(),
       acceptedAt: null,
+      createdAt: new Date().toISOString(),
     });
     const { router } = renderApp('/invite/tok123', { db });
     expect(await screen.findByText('newbie@example.com')).toBeInTheDocument();
@@ -89,5 +90,18 @@ describe('app shell', () => {
   it('redirects members away from /admin', async () => {
     const { router } = renderApp('/admin', { loginAs: ALICE });
     await waitFor(() => expect(router.state.location.pathname).toBe('/'));
+  });
+});
+
+describe('login rate limiting', () => {
+  it('shows a friendly message on 429 RATE_LIMITED', async () => {
+    const db = setupMockApi();
+    db.loginFailures = { [ADMIN]: 99 };
+    renderApp('/login', { db });
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/email/i), ADMIN);
+    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.click(screen.getByRole('button', { name: /log in/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/too many attempts/i);
   });
 });

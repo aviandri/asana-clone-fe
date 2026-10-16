@@ -27,6 +27,7 @@ export type InviteRow = {
   invitedById: string;
   expiresAt: string;
   acceptedAt: string | null;
+  createdAt: string;
 };
 export type TeamRow = { id: string; name: string; description: string | null; createdAt: string };
 export type TeamMemberRow = { teamId: string; userId: string };
@@ -93,6 +94,8 @@ export type NotificationRow = {
 export type MockDb = {
   /** userId of the "cookie" session, or null when logged out */
   sessionUserId: string | null;
+  /** failed login attempts per email (mock rate limiting) */
+  loginFailures?: Record<string, number>;
   seq: number;
   users: UserRow[];
   invites: InviteRow[];

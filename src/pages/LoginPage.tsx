@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError } from '@/api/client';
 import { useAuth } from '@/auth/useAuth';
+import { errorMessage } from '@/lib/errors';
 import { safeNext } from '@/lib/url';
 import { AuthLayout } from './AuthLayout';
 
@@ -24,11 +25,7 @@ export function LoginPage() {
       navigate(safeNext(params.get('next')), { replace: true });
     } catch (err) {
       setError(
-        err instanceof ApiError && err.status === 401
-          ? 'Incorrect email or password.'
-          : err instanceof Error
-            ? err.message
-            : 'Login failed',
+        err instanceof ApiError && err.status === 401 ? 'Incorrect email or password.' : errorMessage(err, 'Login failed'),
       );
       setSubmitting(false);
     }

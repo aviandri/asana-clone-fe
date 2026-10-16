@@ -82,12 +82,48 @@ describe('mock backend', () => {
     expect(call(db, 'GET', `/auth/invites/${inv.token}`).body).toEqual({ email: 'new@example.com', role: 'MEMBER' });
     const res = call(db, 'POST', '/auth/accept-invite', { token: inv.token, name: 'New Person', password: 'longenough' });
     expect(res.status).toBe(200);
-    expect(call(db, 'GET', `/auth/invites/${inv.token}`).status).toBe(404);
+    const reused = call(db, 'GET', `/auth/invites/${inv.token}`);
+    expect(reused.status).toBe(410);
+    expect(reused.body).toMatchObject({ error: { code: 'GONE' } });
+    expect(call(db, 'GET', '/auth/invites/unknown').status).toBe(404);
   });
 
   it('members cannot use admin endpoints', () => {
     const db = createSeedDb();
     loginAs(db, 'alice@example.com');
     expect(call(db, 'GET', '/admin/users').status).toBe(403);
+  });
+
+  it('rate-limits repeated failed logins with 429 RATE_LIMITED', () => {
+    const db = createSeedDb();
+    for (let i = 0; i < 5; i++) {
+      expect(call(db, 'POST', '/auth/login', { email: 'bob@example.com', password: 'nope' }).status).toBe(401);
+    }
+    const res = call(db, 'POST', '/auth/login', { email: 'bob@example.com', password: 'password123' });
+    expect(res.status).toBe(429);
+    expect(res.body).toMatchObject({ error: { code: 'RATE_LIMITED' } });
+  });
+
+  it('creates projects with 201 only in teams the user belongs to (admins exempt)', () => {
+    const db = createSeedDb();
+    loginAs(db, 'bob@example.com'); // not in Marketing
+    const mkt = db.teams.find((t) => t.name === 'Marketing')!;
+    const eng = db.teams.find((t) => t.name === 'Engineering')!;
+    expect(call(db, 'POST', '/projects', { teamId: mkt.id, name: 'X' }).status).toBe(403);
+    expect(call(db, 'POST', '/projects', { teamId: eng.id, name: 'X' }).status).toBe(201);
+    loginAs(db, 'admin@example.com');
+    expect(call(db, 'POST', '/projects', { teamId: mkt.id, name: 'Y' }).status).toBe(201);
+  });
+
+  it('refuses to demote or remove the last project OWNER with 409', () => {
+    const db = createSeedDb();
+    loginAs(db, 'admin@example.com');
+    const p = db.projects.find((x) => x.name === 'Website Redesign')!;
+    const owner = db.users.find((u) => u.email === 'admin@example.com')!;
+    expect(call(db, 'PATCH', `/projects/${p.id}/members/${owner.id}`, { role: 'EDITOR' }).status).toBe(409);
+    expect(call(db, 'DELETE', `/projects/${p.id}/members/${owner.id}`).status).toBe(409);
+    const alice = db.users.find((u) => u.email === 'alice@example.com')!;
+    expect(call(db, 'POST', `/projects/${p.id}/members`, { userId: alice.id, role: 'OWNER' }).status).toBe(200);
+    expect(call(db, 'PATCH', `/projects/${p.id}/members/${owner.id}`, { role: 'EDITOR' }).status).toBe(200);
   });
 });

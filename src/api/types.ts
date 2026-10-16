@@ -121,6 +121,8 @@ export type Invite = {
   token: string;
   inviteUrl: string;
   expiresAt: string;
+  createdAt: string;
+  invitedBy?: UserSummary;
 };
 
 export type ListResponse<T> = { data: T[] };
@@ -133,6 +135,8 @@ export type ErrorCode =
   | 'UNAUTHORIZED'
   | 'FORBIDDEN'
   | 'CONFLICT'
+  | 'GONE'
+  | 'RATE_LIMITED'
   | 'INTERNAL';
 export type ErrorBody = { error: { code: ErrorCode; message: string; details?: unknown } };
 

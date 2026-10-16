@@ -5,6 +5,7 @@ import { ApiError } from '@/api/client';
 import { authApi } from '@/api/endpoints';
 import { useAuth } from '@/auth/useAuth';
 import { Spinner } from '@/components/Spinner';
+import { errorMessage } from '@/lib/errors';
 import { AuthLayout } from './AuthLayout';
 
 export function AcceptInvitePage() {
@@ -32,7 +33,7 @@ export function AcceptInvitePage() {
       await acceptInvite(token, name.trim(), password);
       navigate('/', { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not accept invite');
+      setError(errorMessage(err, 'Could not accept invite'));
       setSubmitting(false);
     }
   }
@@ -48,13 +49,13 @@ export function AcceptInvitePage() {
   }
 
   if (invite.isError) {
-    const expired = invite.error instanceof ApiError && invite.error.status === 410;
+    const expired = invite.error instanceof ApiError && (invite.error.status === 410 || invite.error.code === 'GONE');
     return (
-      <AuthLayout title={expired ? 'Invite expired' : 'Invite not found'}>
+      <AuthLayout title={expired ? 'Invite no longer valid' : 'Invite not found'}>
         <p className="text-sm text-gray-600">
           {expired
-            ? 'This invite link has expired. Ask an admin to send you a new one.'
-            : 'This invite link is invalid or has already been used.'}
+            ? 'This invite link has expired or was already used. Ask an admin for a new one, or log in if you already set up your account.'
+            : 'This invite link is invalid. Check that you copied the whole link.'}
         </p>
         <Link to="/login" className="btn-secondary mt-4 w-full">
           Go to login

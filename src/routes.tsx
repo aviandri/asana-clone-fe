@@ -7,6 +7,7 @@ import { HomePage } from '@/pages/HomePage';
 import { LoginPage } from '@/pages/LoginPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { PlaceholderPage } from '@/pages/PlaceholderPage';
+import { ProjectPage } from '@/projects/ProjectPage';
 
 export const routes: RouteObject[] = [
   {
@@ -37,7 +38,7 @@ export const routes: RouteObject[] = [
           { path: 'inbox', element: <PlaceholderPage title="Inbox" /> },
           { path: 'teams', element: <PlaceholderPage title="Teams" /> },
           { path: 'teams/:teamId', element: <PlaceholderPage title="Team" /> },
-          { path: 'projects/:projectId/:view?', element: <PlaceholderPage title="Project" /> },
+          { path: 'projects/:projectId/:view?', element: <ProjectPage /> },
           {
             path: 'admin',
             element: (

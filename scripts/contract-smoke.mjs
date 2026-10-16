@@ -18,8 +18,10 @@
 //   SEED_PASSWORD   default password123         ┘
 //
 // Data: everything it creates lives in a "[fe-smoke]" team + project (PRIVATE), deleted at the end
-// (also on failure). It marks at most one of alice's smoke notifications as read and does not call
-// read-all. Requires Node 20+ (global fetch, Headers#getSetCookie). Exit code 1 on any failure.
+// (also on failure). The v1.1 goals block (end of file) also creates "[fe-smoke]" goals, a
+// PRIVATE project and a goals-only team, deleted in its own `finally`. It marks at most one of
+// alice's smoke notifications as read and does not call read-all. Requires Node 20+ (global fetch,
+// Headers#getSetCookie). Exit code 1 on any failure.
 // Note: it performs 4 logins; keep AUTH_RATE_LIMIT_MAX ≥ 5/min for the test IP.
 
 const ORIGIN = (process.env.BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
@@ -254,6 +256,8 @@ try {
   results.push({ name: 'deleting a section → tasks sectionId=null', ok: moved.body?.sectionId === null, problems: [`sectionId=${moved.body?.sectionId}`] });
   expect('DELETE /tasks/:id', await admin('DELETE', `/tasks/${t1.id}`), 204);
   expect('GET deleted task → 404', await admin('GET', `/tasks/${sub.id}`), 404, ErrorBody);
+
+  await contractV11Goals({ aliceUser, bobUser, teamId }); // v1.1 §10, defined at the end of this file
 } catch (e) {
   results.push({ name: 'UNCAUGHT', ok: false, problems: [String(e?.stack ?? e)] });
 } finally {
@@ -277,3 +281,151 @@ for (const r of results) {
 }
 console.log(`\n${results.length - failed}/${results.length} passed`);
 process.exitCode = failed ? 1 : 0;
+
+// =====================================================================================
+// v1.1 §10 Goals / OKRs (owned by platform/QA, asana-clone-a0). Self-contained: called once from
+// the main flow, creates its own goals + a PRIVATE project in the smoke team, and deletes them in its
+// own `finally` (before the main flow deletes the team, which 409s while the team has goals).
+// =====================================================================================
+async function contractV11Goals({ aliceUser, bobUser, teamId }) {
+  const GoalStatus = oneOf('NO_STATUS', 'ON_TRACK', 'AT_RISK', 'OFF_TRACK', 'ACHIEVED', 'PARTIAL', 'MISSED', 'DROPPED');
+  const Goal = {
+    id: S, title: S, description: nul(S), owner: UserSummary, team: nul({ id: S, name: S }), isCompany: B,
+    parentId: nul(S), timePeriod: S, status: GoalStatus,
+    progressSource: oneOf('KEY_RESULTS', 'SUB_GOALS', 'PROJECTS', 'MANUAL'),
+    progress: N, weight: N, keyResultCount: N, childCount: N, canEdit: B, createdAt: S, updatedAt: S,
+  };
+  const KeyResult = {
+    id: S, goalId: S, title: S, metricType: oneOf('NUMBER', 'PERCENT', 'CURRENCY', 'BOOLEAN'),
+    startValue: N, targetValue: N, currentValue: N, unit: nul(S), owner: nul(UserSummary),
+    progress: N, position: N, updatedAt: S,
+  };
+  const GoalUpdate = { id: S, goalId: S, author: UserSummary, status: GoalStatus, progress: N, body: nul(S), createdAt: S };
+  const GoalDetail = {
+    ...Goal, parent: nul({ id: S, title: S }), keyResults: arr(KeyResult), children: arr(Goal),
+    projects: arr({ project: { id: S, name: S, color: S }, total: N, completed: N }),
+    hiddenProjectCount: N, latestUpdate: nul(GoalUpdate),
+  };
+  const same = (name, actual, expected) =>
+    results.push({ name, ok: JSON.stringify(actual) === JSON.stringify(expected), problems: [`got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`] });
+  const errorPath = (body) => JSON.stringify(body?.error?.details ?? '');
+
+  const now = new Date();
+  const period = `${now.getUTCFullYear()}-Q${Math.floor(now.getUTCMonth() / 3) + 1}`;
+  const goalIds = []; // deleted in reverse order in `finally`
+  let goalProjectId, bareTeamId;
+
+  try {
+    const periods = expect('GET /goals/time-periods', await admin('GET', '/goals/time-periods'), 200, List(S));
+    results.push({ name: 'time-periods include a current quarter (YYYY-Qn)', ok: periods?.data?.some((p) => /^\d{4}-Q[1-4]$/.test(p)), problems: [`data=${JSON.stringify(periods?.data)}`] });
+
+    // ---- levels & create permissions ----
+    expect('POST company goal as member → 403', await alice('POST', '/goals', { title: `${PREFIX} co`, timePeriod: period, isCompany: true }), 403, ErrorBody);
+    expect('POST goal isCompany + teamId → 400', await admin('POST', '/goals', { title: `${PREFIX} both`, timePeriod: period, isCompany: true, teamId }), 400, ErrorBody);
+    expect('POST goal bad timePeriod → 400', await admin('POST', '/goals', { title: `${PREFIX} bad`, timePeriod: '2026-Q5' }), 400, ErrorBody);
+    const company = expect('POST /goals (company, SUB_GOALS)', await admin('POST', '/goals', { title: `${PREFIX} company`, timePeriod: period, isCompany: true, progressSource: 'SUB_GOALS' }), 201, GoalDetail);
+    goalIds.push(company.id);
+    expect('POST team goal as non-member → 403 (bob)', await bob('POST', '/goals', { title: `${PREFIX} t`, timePeriod: period, teamId }), 403, ErrorBody);
+    const teamGoal = expect('POST /goals (team, KEY_RESULTS, aligned)', await alice('POST', '/goals', { title: `${PREFIX} team goal`, timePeriod: period, teamId, parentId: company.id }), 201, GoalDetail);
+    goalIds.push(teamGoal.id);
+    same('team goal defaults (owner=caller, KEY_RESULTS, NO_STATUS, weight 1)', [teamGoal?.owner?.id, teamGoal?.progressSource, teamGoal?.status, teamGoal?.weight, teamGoal?.team?.id], [aliceUser.id, 'KEY_RESULTS', 'NO_STATUS', 1, teamId]);
+    const personal = expect('POST /goals (personal, MANUAL, weight 3)', await bob('POST', '/goals', { title: `${PREFIX} personal`, timePeriod: period, parentId: company.id, progressSource: 'MANUAL', weight: 3 }), 201, GoalDetail);
+    goalIds.push(personal.id);
+
+    // ---- KEY_RESULTS progress: mean of KR progress ----
+    const kr1 = expect('POST /goals/:id/key-results (NUMBER 0→200 @50)', await alice('POST', `/goals/${teamGoal.id}/key-results`, { title: `${PREFIX} signups`, metricType: 'NUMBER', targetValue: 200, currentValue: 50 }), 201, KeyResult);
+    const kr2 = expect('POST key result (PERCENT decreasing 100→20 @60)', await alice('POST', `/goals/${teamGoal.id}/key-results`, { title: `${PREFIX} churn`, metricType: 'PERCENT', startValue: 100, targetValue: 20, currentValue: 60, unit: '%' }), 201, KeyResult);
+    const kr3 = expect('POST key result (BOOLEAN)', await alice('POST', `/goals/${teamGoal.id}/key-results`, { title: `${PREFIX} launched`, metricType: 'BOOLEAN', targetValue: 1 }), 201, KeyResult);
+    same('KR progress: NUMBER 25, decreasing PERCENT 50, BOOLEAN 0', [kr1?.progress, kr2?.progress, kr3?.progress], [25, 50, 0]);
+    expect('PATCH BOOLEAN KR currentValue 0.5 → 400', await alice('PATCH', `/key-results/${kr3.id}`, { currentValue: 0.5 }), 400, ErrorBody);
+    const kr3b = expect('PATCH /key-results/:id (BOOLEAN → 1)', await alice('PATCH', `/key-results/${kr3.id}`, { currentValue: 1 }), 200, KeyResult);
+    same('BOOLEAN KR at 1 → 100', kr3b?.progress, 100);
+    const over = expect('PATCH KR beyond target', await alice('PATCH', `/key-results/${kr1.id}`, { currentValue: 500 }), 200, KeyResult);
+    same('KR progress clamps at 100', over?.progress, 100);
+    await alice('PATCH', `/key-results/${kr1.id}`, { currentValue: 50 });
+    const tg = expect('GET /goals/:id (team goal)', await alice('GET', `/goals/${teamGoal.id}`), 200, GoalDetail);
+    // mean(25, 50, 100) = 58.33… → 58.3
+    same('KEY_RESULTS progress = mean of KRs (58.3)', [tg?.progress, tg?.keyResultCount, tg?.keyResults?.map((k) => k.id)], [58.3, 3, [kr1.id, kr2.id, kr3.id]]);
+
+    // ---- MANUAL ----
+    const pm = expect('PATCH manualProgress', await bob('PATCH', `/goals/${personal.id}`, { manualProgress: 80 }), 200, GoalDetail);
+    same('MANUAL progress = manualProgress', pm?.progress, 80);
+
+    // ---- SUB_GOALS: weight-averaged children, rolled up unrounded ----
+    // (58.333… × 1 + 80 × 3) / 4 = 74.58… → 74.6
+    const co = expect('GET /goals/:id (company)', await admin('GET', `/goals/${company.id}`), 200, GoalDetail);
+    same('SUB_GOALS progress = weighted mean of children (74.6)', [co?.progress, co?.childCount, co?.children?.map((c) => c.id).sort()], [74.6, 2, [teamGoal.id, personal.id].sort()]);
+
+    // ---- edit permissions & KR owner ----
+    const asBob = expect('GET team goal as non-member', await bob('GET', `/goals/${teamGoal.id}`), 200, GoalDetail);
+    same('canEdit false for non-member, true for team member', [asBob?.canEdit, tg?.canEdit], [false, true]);
+    expect('PATCH team goal as non-member → 403', await bob('PATCH', `/goals/${teamGoal.id}`, { title: `${PREFIX} hijack` }), 403, ErrorBody);
+    const owned = expect('POST KR owned by bob on company goal', await admin('POST', `/goals/${company.id}/key-results`, { title: `${PREFIX} owned`, metricType: 'NUMBER', targetValue: 10, ownerId: bobUser.id }), 201, KeyResult);
+    expect('KR owner may update currentValue', await bob('PATCH', `/key-results/${owned.id}`, { currentValue: 4 }), 200, KeyResult);
+    expect('KR owner may not edit other KR fields → 403', await bob('PATCH', `/key-results/${owned.id}`, { title: `${PREFIX} renamed` }), 403, ErrorBody);
+    const co2 = await admin('GET', `/goals/${company.id}`);
+    same('KRs do not affect a SUB_GOALS goal', co2.body?.progress, 74.6);
+    expect('DELETE /key-results/:id', await admin('DELETE', `/key-results/${owned.id}`), 204);
+
+    // ---- cascade validation ----
+    const cyc = expect('PATCH parentId creating a cycle → 400', await admin('PATCH', `/goals/${company.id}`, { parentId: teamGoal.id }), 400, ErrorBody);
+    results.push({ name: 'cycle error details name parentId', ok: errorPath(cyc).includes('parentId'), problems: [`details=${errorPath(cyc)}`] });
+    expect('PATCH goal as its own parent → 400', await alice('PATCH', `/goals/${teamGoal.id}`, { parentId: teamGoal.id }), 400, ErrorBody);
+
+    // ---- PROJECTS: completed ÷ total over all tasks incl. subtasks; hidden projects ----
+    const gp = expect('POST project for PROJECTS goal (PRIVATE)', await admin('POST', '/projects', { teamId, name: `${PREFIX} goal project`, privacy: 'PRIVATE' }), 201, ProjectDetail);
+    goalProjectId = gp.id;
+    const a = (await admin('POST', '/tasks', { title: `${PREFIX} a`, projectId: goalProjectId })).body;
+    const b = (await admin('POST', '/tasks', { title: `${PREFIX} b`, projectId: goalProjectId })).body;
+    const sb = (await admin('POST', '/tasks', { title: `${PREFIX} b.1`, parentId: b.id })).body;
+    await admin('POST', '/tasks', { title: `${PREFIX} c`, projectId: goalProjectId });
+    await admin('PATCH', `/tasks/${a.id}`, { completed: true });
+    await admin('PATCH', `/tasks/${sb.id}`, { completed: true });
+    const pg = expect('POST /goals (personal, PROJECTS)', await admin('POST', '/goals', { title: `${PREFIX} projects goal`, timePeriod: period, progressSource: 'PROJECTS' }), 201, GoalDetail);
+    goalIds.push(pg.id);
+    const linked = expect('POST /goals/:id/projects', await admin('POST', `/goals/${pg.id}/projects`, { projectId: goalProjectId }), 200, GoalDetail);
+    // 4 tasks (a, b, b.1, c), 2 completed (a, b.1) → 50
+    same('PROJECTS progress counts subtasks (2/4 → 50)', [linked?.progress, linked?.projects?.[0]?.total, linked?.projects?.[0]?.completed, linked?.hiddenProjectCount], [50, 4, 2, 0]);
+    const hidden = expect('GET PROJECTS goal as user who cannot see the project', await bob('GET', `/goals/${pg.id}`), 200, GoalDetail);
+    same('hidden project omitted + counted, still feeds progress', [hidden?.projects?.length, hidden?.hiddenProjectCount, hidden?.progress], [0, 1, 50]);
+    expect('DELETE /goals/:id/projects/:projectId', await admin('DELETE', `/goals/${pg.id}/projects/${goalProjectId}`), 200, GoalDetail);
+
+    // ---- status updates ----
+    const up = expect('POST /goals/:id/updates', await alice('POST', `/goals/${teamGoal.id}/updates`, { status: 'AT_RISK', body: `${PREFIX} slipping` }), 201, GoalUpdate);
+    same('update snapshots progress', up?.progress, 58.3);
+    await alice('POST', `/goals/${teamGoal.id}/updates`, { status: 'ON_TRACK' });
+    const ups = expect('GET /goals/:id/updates', await alice('GET', `/goals/${teamGoal.id}/updates`), 200, List(GoalUpdate));
+    same('updates newest first', ups?.data?.map((u) => u.status).slice(0, 2), ['ON_TRACK', 'AT_RISK']);
+    const after = await alice('GET', `/goals/${teamGoal.id}`);
+    same('update sets goal status + latestUpdate', [after.body?.status, after.body?.latestUpdate?.status], ['ON_TRACK', 'ON_TRACK']);
+    expect('POST update as non-editor → 403 (bob)', await bob('POST', `/goals/${teamGoal.id}/updates`, { status: 'OFF_TRACK' }), 403, ErrorBody);
+
+    // ---- list filters ----
+    const listed = expect('GET /goals?timePeriod=', await admin('GET', `/goals?timePeriod=${period}`), 200, List(Goal));
+    results.push({ name: 'GET /goals lists smoke goals for the period', ok: [company.id, teamGoal.id, personal.id].every((id) => listed?.data?.some((g) => g.id === id)), problems: [] });
+    const cos = expect('GET /goals?company=true', await admin('GET', '/goals?company=true'), 200, List(Goal));
+    results.push({ name: '?company=true returns only company goals', ok: cos?.data?.every((g) => g.isCompany), problems: [] });
+    expect('GET /goals?teamId=&q=', await admin('GET', `/goals?teamId=${teamId}&q=${encodeURIComponent('fe-smoke')}`), 200, List(Goal));
+
+    // ---- team delete blocked by goals alone (the smoke team also has projects, so use a bare team) ----
+    const bare = expect('POST /teams (goals-only)', await admin('POST', '/teams', { name: `${PREFIX} goals-only team` }), 201, TeamDetail);
+    bareTeamId = bare.id;
+    const bareGoal = expect('POST /goals (team goal as ADMIN, not a member)', await admin('POST', '/goals', { title: `${PREFIX} bare`, timePeriod: period, teamId: bareTeamId }), 201, GoalDetail);
+    goalIds.push(bareGoal.id);
+    expect('DELETE /teams/:id with only goals → 409', await admin('DELETE', `/teams/${bareTeamId}`), 409, ErrorBody);
+
+    // ---- deleting a parent orphans its children ----
+    expect('DELETE /goals/:id (company)', await admin('DELETE', `/goals/${company.id}`), 204);
+    goalIds.splice(goalIds.indexOf(company.id), 1);
+    const orphan = await alice('GET', `/goals/${teamGoal.id}`);
+    same('children of a deleted goal get parentId=null', orphan.body?.parentId, null);
+  } finally {
+    for (const id of goalIds.reverse()) {
+      const res = await admin('DELETE', `/goals/${id}`);
+      if (res.status !== 204 && res.status !== 404) expect(`cleanup DELETE /goals/${id}`, res, 204);
+    }
+    if (goalProjectId) expect('cleanup DELETE goal project', await admin('DELETE', `/projects/${goalProjectId}`), 204);
+    // Goals are gone now, so this also checks the 409 above was about goals.
+    if (bareTeamId) expect('DELETE /teams/:id once its goals are deleted', await admin('DELETE', `/teams/${bareTeamId}`), 204);
+  }
+}

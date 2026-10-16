@@ -200,7 +200,8 @@ function assertCanSeeTaskProject(db: MockDb, t: TaskRow, user: UserRow, field: s
   const p = db.projects.find((x) => x.id === t.projectId)!;
   if (!canSeeProject(db, p, user)) {
     const message = `${user.name} doesn’t have access to this project`;
-    throw new HttpError(400, 'VALIDATION', message, { [field]: message });
+    // Same shape as the BE (zod issues): [{ path: [field], message }]
+    throw new HttpError(400, 'VALIDATION', message, [{ path: [field], message }]);
   }
 }
 

@@ -7,7 +7,12 @@ const STEP = 1000;
 export function positionBetween(prev: number | null | undefined, next: number | null | undefined): number {
   const hasPrev = prev !== null && prev !== undefined;
   const hasNext = next !== null && next !== undefined;
-  if (hasPrev && hasNext) return (prev + next) / 2;
+  if (hasPrev && hasNext) {
+    // Equal/inverted neighbours (legacy data or exhausted float gaps) have no midpoint; fall back
+    // to just after `prev` so the item still lands near its target. The server may renormalise.
+    if (next - prev <= Number.EPSILON * Math.max(1, Math.abs(prev))) return prev + STEP;
+    return (prev + next) / 2;
+  }
   if (hasPrev) return prev + STEP;
   if (hasNext) return next - STEP;
   return STEP;

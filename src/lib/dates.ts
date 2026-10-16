@@ -1,7 +1,9 @@
 import {
   addDays,
   differenceInCalendarDays,
+  differenceInSeconds,
   endOfMonth,
+  formatDistanceToNowStrict,
   endOfWeek,
   format,
   isSameYear,
@@ -46,4 +48,13 @@ export function monthGrid(month: Date): Date[] {
   const days: Date[] = [];
   for (let d = start; d <= end; d = addDays(d, 1)) days.push(d);
   return days;
+}
+
+/** Compact timestamp for feeds: "just now", "5 minutes ago", "Oct 3", "Oct 3, 2025". */
+export function timeAgo(iso: string, now = new Date()): string {
+  const d = new Date(iso);
+  const secs = differenceInSeconds(now, d);
+  if (secs < 60) return 'just now';
+  if (secs < 24 * 3600) return `${formatDistanceToNowStrict(d)} ago`;
+  return isSameYear(d, now) ? format(d, 'MMM d') : format(d, 'MMM d, yyyy');
 }

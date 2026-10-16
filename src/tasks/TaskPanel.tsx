@@ -12,6 +12,7 @@ import { DotsIcon, PlusIcon, XIcon } from '@/components/icons';
 import { errorMessage } from '@/lib/errors';
 import { canEditProjectContent } from '@/lib/permissions';
 import { positionAtEnd } from '@/lib/position';
+import { CommentComposer, StoryFeed } from './Stories';
 import { AssigneeField, CompleteToggle, DueDateField, PrioritySelect, UserPickerList } from './fields';
 import { useCreateTask, useDeleteTask, useFollowTask, useUpdateTask } from './useTaskMutations';
 import { useTaskPanel } from './useTaskPanel';
@@ -243,10 +244,7 @@ function TaskMenu({ task, onDeleted, canEdit }: { task: TaskDetail; onDeleted: (
   );
 }
 
-/** Extra content rendered under the task body (comments & activity feed). */
-export type TaskPanelSlot = (task: TaskDetail, canEdit: boolean) => ReactNode;
-
-export function TaskPanel({ taskId, footer }: { taskId: string; footer?: TaskPanelSlot }) {
+export function TaskPanel({ taskId }: { taskId: string }) {
   const panel = useTaskPanel();
   const { close } = panel;
   const me = useCurrentUser();
@@ -402,9 +400,10 @@ export function TaskPanel({ taskId, footer }: { taskId: string; footer?: TaskPan
 
           {!t.parentId && <SubtaskList task={t} canEdit={canEdit} />}
 
-          {footer?.(t, canEdit)}
+          <StoryFeed task={t} />
         </div>
       </div>
+      <CommentComposer task={t} />
       <Followers task={t} />
     </div>
   );

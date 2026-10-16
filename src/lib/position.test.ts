@@ -8,6 +8,10 @@ describe('position', () => {
     expect(positionBetween(undefined, 1000)).toBe(0);
     expect(positionBetween(null, null)).toBe(1000);
   });
+  it('never returns a duplicate for equal or inverted neighbours', () => {
+    expect(positionBetween(2000, 2000)).toBe(3000);
+    expect(positionBetween(3000, 2000)).toBe(4000);
+  });
   it('appends after the max', () => {
     expect(positionAtEnd([])).toBe(1000);
     expect(positionAtEnd([{ position: 3000 }, { position: 1000 }])).toBe(4000);

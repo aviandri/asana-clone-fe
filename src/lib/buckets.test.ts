@@ -12,8 +12,9 @@ describe('due-date buckets', () => {
     expect(bucketFor(t('2026-10-23'), now)).toBe('later');
     expect(bucketFor(t(null), now)).toBe('none');
   });
-  it('never marks completed tasks overdue', () => {
-    expect(bucketFor(t('2026-10-01', true), now)).toBe('today');
+  it('puts completed tasks in their own group (never overdue)', () => {
+    expect(bucketFor(t('2026-10-01', true), now)).toBe('completed');
+    expect(bucketFor(t(null, true), now)).toBe('completed');
   });
   it('sorts by due date within a bucket', () => {
     const g = groupByBucket([t('2026-10-20', false, 'b'), t('2026-10-17', false, 'a')], now);

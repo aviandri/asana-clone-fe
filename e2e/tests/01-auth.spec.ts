@@ -1,5 +1,8 @@
 import { ADMIN, expect, loginViaUi, test } from '../fixtures';
 
+// These tests exercise the login form itself, so start logged out.
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test('rejects a wrong password', async ({ page }) => {
   await page.goto('/login');
   await page.getByLabel('Email address').fill(ADMIN.email);

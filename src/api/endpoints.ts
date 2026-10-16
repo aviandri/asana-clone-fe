@@ -1,6 +1,18 @@
-import { http } from './client';
+import { API_BASE, http } from './client';
 import type {
+  CreateGoalInput,
+  CreateKeyResultInput,
   CreateProjectInput,
+  Goal,
+  GoalDetail,
+  GoalStatus,
+  GoalUpdate,
+  KeyResult,
+  OverviewReport,
+  ProjectReport,
+  UpdateGoalInput,
+  UpdateKeyResultInput,
+  WorkloadReport,
   CreateTaskInput,
   Invite,
   ListResponse,
@@ -118,4 +130,31 @@ export const notificationsApi = {
 
 export const searchApi = {
   search: (q: string) => http.get<SearchResponse>('/search', { q }),
+};
+
+export const goalsApi = {
+  list: (query: { timePeriod?: string; teamId?: string; ownerId?: string; company?: boolean; q?: string } = {}) =>
+    http.get<ListResponse<Goal>>('/goals', query),
+  timePeriods: () => http.get<ListResponse<string>>('/goals/time-periods'),
+  get: (id: string) => http.get<GoalDetail>(`/goals/${id}`),
+  create: (body: CreateGoalInput) => http.post<GoalDetail>('/goals', body),
+  update: (id: string, body: UpdateGoalInput) => http.patch<GoalDetail>(`/goals/${id}`, body),
+  delete: (id: string) => http.delete(`/goals/${id}`),
+  addKeyResult: (id: string, body: CreateKeyResultInput) => http.post<KeyResult>(`/goals/${id}/key-results`, body),
+  updateKeyResult: (krId: string, body: UpdateKeyResultInput) => http.patch<KeyResult>(`/key-results/${krId}`, body),
+  deleteKeyResult: (krId: string) => http.delete(`/key-results/${krId}`),
+  linkProject: (id: string, projectId: string) => http.post<GoalDetail>(`/goals/${id}/projects`, { projectId }),
+  unlinkProject: (id: string, projectId: string) => http.delete<GoalDetail>(`/goals/${id}/projects/${projectId}`),
+  updates: (id: string) => http.get<ListResponse<GoalUpdate>>(`/goals/${id}/updates`),
+  postUpdate: (id: string, body: { status: GoalStatus; body?: string | null }) =>
+    http.post<GoalUpdate>(`/goals/${id}/updates`, body),
+};
+
+export const reportsApi = {
+  project: (id: string, weeks = 12) => http.get<ProjectReport>(`/projects/${id}/report`, { weeks }),
+  overview: (teamId?: string) => http.get<OverviewReport>('/reports/overview', { teamId }),
+  workload: (query: { teamId?: string; from?: string; to?: string } = {}) =>
+    http.get<WorkloadReport>('/reports/workload', query),
+  /** Plain link (cookie-authenticated download), not fetched via JS. */
+  projectCsvUrl: (id: string) => `${API_BASE}/projects/${id}/tasks.csv`,
 };

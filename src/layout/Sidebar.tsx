@@ -18,6 +18,7 @@ import {
   PlusIcon,
   SearchIcon,
   ShieldIcon,
+  TargetIcon,
 } from '@/components/icons';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -145,6 +146,9 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
               </span>
             )}
           </span>
+        </NavItem>
+        <NavItem to="/goals" icon={<TargetIcon />}>
+          Goals
         </NavItem>
         {user.role === 'ADMIN' && (
           <NavItem to="/admin" icon={<ShieldIcon />}>

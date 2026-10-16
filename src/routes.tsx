@@ -1,5 +1,7 @@
 import { Outlet, type RouteObject } from 'react-router-dom';
 import { AdminPage } from '@/admin/AdminPage';
+import { GoalDetailPage } from '@/goals/GoalDetailPage';
+import { GoalsPage } from '@/goals/GoalsPage';
 import { AuthProvider } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAdmin, RequireAuth } from '@/auth/guards';
 import { AppShell } from '@/layout/AppShell';
@@ -40,6 +42,8 @@ export const routes: RouteObject[] = [
           { index: true, element: <HomePage /> },
           { path: 'my-tasks', element: <MyTasksPage /> },
           { path: 'inbox', element: <InboxPage /> },
+          { path: 'goals', element: <GoalsPage /> },
+          { path: 'goals/:goalId', element: <GoalDetailPage /> },
           { path: 'teams', element: <TeamsPage /> },
           { path: 'teams/:teamId', element: <TeamPage /> },
           { path: 'projects/:projectId/:view?', element: <ProjectPage /> },

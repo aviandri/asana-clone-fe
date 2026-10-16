@@ -19,9 +19,10 @@
 //
 // Data: everything it creates lives in a "[fe-smoke]" team + project (PRIVATE), deleted at the end
 // (also on failure). The v1.1 goals block (end of file) also creates "[fe-smoke]" goals, a
-// PRIVATE project and a goals-only team, deleted in its own `finally`. It marks at most one of
-// alice's smoke notifications as read and does not call read-all. Requires Node 20+ (global fetch,
-// Headers#getSetCookie). Exit code 1 on any failure.
+// PRIVATE project and a goals-only team, and the §11 reports block a PRIVATE project; each block
+// deletes its own data in its `finally`. It marks at most one of alice's smoke notifications as read
+// and does not call read-all. Requires Node 20+ (global fetch, Headers#getSetCookie). Exit code 1 on
+// any failure.
 // Note: it performs 4 logins; keep AUTH_RATE_LIMIT_MAX ≥ 5/min for the test IP.
 
 const ORIGIN = (process.env.BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
@@ -129,10 +130,12 @@ function client(label) {
       const [pair] = c.split(';');
       if (pair.startsWith('sid=')) cookie = pair.endsWith('=') ? '' : pair;
     }
-    const text = await res.text();
+    // Raw bytes are kept for the CSV BOM check; TextDecoder strips a BOM like res.text() does.
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
     let json;
     try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
-    return { status: res.status, body: json, label };
+    return { status: res.status, body: json, label, headers: res.headers, bytes };
   };
 }
 
@@ -258,6 +261,7 @@ try {
   expect('GET deleted task → 404', await admin('GET', `/tasks/${sub.id}`), 404, ErrorBody);
 
   await contractV11Goals({ aliceUser, bobUser, teamId }); // v1.1 §10, defined at the end of this file
+  await contractV11Reports({ aliceUser, bobUser, teamId }); // v1.1 §11, defined at the end of this file
 } catch (e) {
   results.push({ name: 'UNCAUGHT', ok: false, problems: [String(e?.stack ?? e)] });
 } finally {
@@ -428,4 +432,144 @@ async function contractV11Goals({ aliceUser, bobUser, teamId }) {
     // Goals are gone now, so this also checks the 409 above was about goals.
     if (bareTeamId) expect('DELETE /teams/:id once its goals are deleted', await admin('DELETE', `/teams/${bareTeamId}`), 204);
   }
+}
+
+// =====================================================================================
+// v1.1 §11 Reporting (owned by platform/QA, asana-clone-a0). Self-contained like the goals block:
+// creates one PRIVATE project with known tasks in the smoke team, checks the reports against
+// exact expected numbers, and deletes the project in its own `finally`.
+// =====================================================================================
+async function contractV11Reports({ aliceUser, bobUser, teamId }) {
+  const Counts = { total: N, completed: N, incomplete: N, overdue: N };
+  const ProjectReport = {
+    project: { id: S, name: S, color: S },
+    totals: { ...Counts, unassigned: N, percentComplete: N },
+    bySection: arr({ sectionId: nul(S), name: S, total: N, completed: N, overdue: N }),
+    byAssignee: arr({ assignee: nul(UserSummary), incomplete: N, completed: N, overdue: N }),
+    byPriority: arr({ priority: oneOf('NONE', 'LOW', 'MEDIUM', 'HIGH'), total: N, incomplete: N }),
+    trend: arr({ weekStart: S, created: N, completed: N, open: N }),
+    upcoming: arr(Task),
+  };
+  const OverviewReport = {
+    totals: { ...Counts, projects: N },
+    projects: arr({ ...Counts, project: Project, percentComplete: N, lastActivityAt: nul(S) }),
+  };
+  const WorkloadReport = {
+    from: S, to: S,
+    data: arr({ user: UserSummary, open: N, overdue: N, dueInRange: N, completedInRange: N }),
+  };
+  const same = (name, actual, expected) =>
+    results.push({ name, ok: JSON.stringify(actual) === JSON.stringify(expected), problems: [`got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`] });
+
+  // "Today" as the BE sees it (APP_TIMEZONE, SPEC §11), and date-only arithmetic in UTC.
+  const tz = process.env.APP_TIMEZONE ?? 'Asia/Jakarta';
+  const zToday = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+  const plusDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+  let reportProjectId;
+  try {
+    // ---- fixture: PRIVATE project, alice is an EDITOR, bob has no access ----
+    const p = expect('POST project for reports (PRIVATE)', await admin('POST', '/projects', { teamId, name: `${PREFIX} report Q4!`, privacy: 'PRIVATE' }), 201, ProjectDetail);
+    reportProjectId = p.id;
+    await admin('POST', `/projects/${p.id}/members`, { userId: aliceUser.id, role: 'EDITOR' });
+    const [todo, doing] = p.sections; // "To do", "In progress"
+    const mk = async (body) => (await admin('POST', '/tasks', { projectId: p.id, ...body })).body;
+    // To do: A (alice, HIGH, overdue), C (unassigned, done), E (alice, done today)
+    const A = await mk({ title: '=SUM(1) overdue', sectionId: todo.id, assigneeId: aliceUser.id, priority: 'HIGH', dueDate: plusDays(zToday, -1) });
+    const C = await mk({ title: `${PREFIX} done unassigned`, sectionId: todo.id });
+    const E = await mk({ title: '+1 call done', sectionId: todo.id, assigneeId: aliceUser.id });
+    // In progress: B (alice, LOW, due in 2 days) with subtask B1 (unassigned, open)
+    const Bt = await mk({ title: 'Quote "x", comma', sectionId: doing.id, assigneeId: aliceUser.id, priority: 'LOW', dueDate: plusDays(zToday, 2) });
+    const B1 = await mk({ title: `${PREFIX} sub of B`, parentId: Bt.id });
+    // No section: D (unassigned, MEDIUM, multi-line title)
+    const D = await mk({ title: 'line one\nline two', priority: 'MEDIUM' });
+    await admin('PATCH', `/tasks/${C.id}`, { completed: true });
+    await admin('PATCH', `/tasks/${E.id}`, { completed: true });
+    results.push({ name: 'report fixture created', ok: [A, C, E, Bt, B1, D].every((t) => t?.id), problems: [] });
+
+    // ---- GET /projects/:id/report ----
+    const r = expect('GET /projects/:id/report?weeks=4', await admin('GET', `/projects/${p.id}/report?weeks=4`), 200, ProjectReport);
+    // 6 tasks incl. the subtask; done C, E; overdue A; unassigned = incomplete & unassigned = B1, D (not C).
+    same('report totals (subtasks counted, unassigned = incomplete only)', r?.totals, { total: 6, completed: 2, incomplete: 4, overdue: 1, unassigned: 2, percentComplete: 33.3 });
+    const sec = (id) => r?.bySection?.find((s) => s.sectionId === id);
+    same('bySection: To do 3/2 done/1 overdue; subtask under parent section (In progress 2)', [sec(todo.id)?.total, sec(todo.id)?.completed, sec(todo.id)?.overdue, sec(doing.id)?.total], [3, 2, 1, 2]);
+    same('bySection: "No section" last', [r?.bySection?.at(-1)?.sectionId, r?.bySection?.at(-1)?.total], [null, 1]);
+    const byA = (uid) => r?.byAssignee?.find((x) => (x.assignee?.id ?? null) === uid);
+    same('byAssignee alice / unassigned', [byA(aliceUser.id), byA(null)].map((x) => x && [x.incomplete, x.completed, x.overdue]), [[2, 1, 1], [2, 1, 0]]);
+    results.push({ name: 'byAssignee sorted by incomplete desc', ok: !!r?.byAssignee?.every((x, i, a) => i === 0 || a[i - 1].incomplete >= x.incomplete), problems: [] });
+    same('byPriority: all four, HIGH→NONE', r?.byPriority?.map((x) => [x.priority, x.total, x.incomplete]), [['HIGH', 1, 1], ['MEDIUM', 1, 1], ['LOW', 1, 1], ['NONE', 3, 1]]);
+    const last = r?.trend?.at(-1);
+    same('trend: 4 Monday weeks oldest→newest; this week created 6 / completed 2 / open 4', [r?.trend?.length, new Date(`${last?.weekStart}T00:00:00Z`).getUTCDay(), r?.trend?.every((w, i, a) => i === 0 || a[i - 1].weekStart < w.weekStart), last?.created, last?.completed, last?.open], [4, 1, true, 6, 2, 4]);
+    same('upcoming: incomplete, due today..+14d (not overdue A)', r?.upcoming?.map((t) => t.id), [Bt.id]);
+    expect('GET report weeks=53 → 400', await admin('GET', `/projects/${p.id}/report?weeks=53`), 400, ErrorBody);
+    expect('GET report as non-member → 404 (bob)', await bob('GET', `/projects/${p.id}/report`), 404, ErrorBody);
+    expect('GET report as project member (alice)', await alice('GET', `/projects/${p.id}/report`), 200, ProjectReport);
+
+    // ---- GET /reports/overview ----
+    const ov = expect('GET /reports/overview?teamId=', await admin('GET', `/reports/overview?teamId=${teamId}`), 200, OverviewReport);
+    const row = ov?.projects?.find((x) => x.project.id === p.id);
+    same('overview row for report project', row && [row.total, row.completed, row.incomplete, row.overdue, row.percentComplete, typeof row.lastActivityAt], [6, 2, 4, 1, 33.3, 'string']);
+    results.push({ name: 'overview projects sorted by name', ok: !!ov?.projects?.every((x, i, a) => i === 0 || a[i - 1].project.name.localeCompare(x.project.name) <= 0), problems: [] });
+    const ovBob = expect('GET /reports/overview as bob', await bob('GET', `/reports/overview?teamId=${teamId}`), 200, OverviewReport);
+    same('overview hides projects the caller cannot see', ovBob?.projects?.some((x) => x.project.id === p.id), false);
+
+    // ---- GET /reports/workload (strict §4 visibility) ----
+    const range = `from=${zToday}&to=${plusDays(zToday, 6)}`;
+    const wl = expect('GET /reports/workload?teamId=&from=&to=', await admin('GET', `/reports/workload?teamId=${teamId}&${range}`), 200, WorkloadReport);
+    const wa = wl?.data?.find((x) => x.user.id === aliceUser.id);
+    // open A,B; overdue A; dueInRange = incomplete due in range = B; completedInRange = E.
+    same('workload (admin view) for alice', wa && [wa.open, wa.overdue, wa.dueInRange, wa.completedInRange], [2, 1, 1, 1]);
+    same('workload echoes the range', [wl?.from, wl?.to], [zToday, plusDays(zToday, 6)]);
+    same('workload ?teamId lists only team members (no bob)', wl?.data?.some((x) => x.user.id === bobUser.id), false);
+    const wlBob = expect('GET /reports/workload as bob', await bob('GET', `/reports/workload?teamId=${teamId}&${range}`), 200, WorkloadReport);
+    const wb = wlBob?.data?.find((x) => x.user.id === aliceUser.id);
+    same('workload counts only tasks the caller can see (bob: alice all 0)', wb && [wb.open, wb.overdue, wb.dueInRange, wb.completedInRange], [0, 0, 0, 0]);
+    const def = expect('GET /reports/workload (default range)', await admin('GET', '/reports/workload'), 200, WorkloadReport);
+    same('default range = this Monday..Sunday', [new Date(`${def?.from}T00:00:00Z`).getUTCDay(), def?.to === (def?.from && plusDays(def.from, 6))], [1, true]);
+    expect('workload from > to → 400', await admin('GET', `/reports/workload?from=${plusDays(zToday, 1)}&to=${zToday}`), 400, ErrorBody);
+    expect('workload range > 92 days → 400', await admin('GET', `/reports/workload?from=${zToday}&to=${plusDays(zToday, 92)}`), 400, ErrorBody);
+    expect('workload unknown teamId → 404', await admin('GET', '/reports/workload?teamId=00000000-0000-4000-8000-000000000000'), 404, ErrorBody);
+
+    // ---- GET /projects/:id/tasks.csv (raw bytes: `body` has the BOM decoded away) ----
+    const csvRes = await admin('GET', `/projects/${p.id}/tasks.csv`);
+    const ctype = csvRes.headers.get('content-type') ?? '';
+    const disp = csvRes.headers.get('content-disposition') ?? '';
+    same('CSV 200 + text/csv; charset=utf-8 + attachment filename', [csvRes.status, /^text\/csv;\s*charset=utf-8$/i.test(ctype), disp], [200, true, 'attachment; filename="fe-smoke-report-q4-tasks.csv"']);
+    same('CSV starts with a UTF-8 BOM (EF BB BF)', [...csvRes.bytes.slice(0, 3)], [0xef, 0xbb, 0xbf]);
+    const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(csvRes.bytes).replace(/^\uFEFF/, '');
+    const rows = parseCsv(text);
+    same('CSV records end with CRLF (header + trailing)', [text.startsWith(`${rows.header.join(',')}\r\n`), text.endsWith('\r\n'), rows.bareLf], [true, true, 0]);
+    same('CSV header', rows.header.join(','), 'id,title,section,parent_task_id,assignee_name,assignee_email,priority,start_date,due_date,completed,completed_at,created_at');
+    // List order: To do (A, C, E), In progress (B then its subtask B1), then no section (D).
+    same('CSV rows in list order, subtasks after their parent', rows.records.map((x) => x[0]), [A.id, C.id, E.id, Bt.id, B1.id, D.id]);
+    const col = (rec, name) => rec?.[rows.header.indexOf(name)];
+    const recOf = (id) => rows.records.find((x) => x[0] === id);
+    same('CSV formula-injection prefix for = and +', [col(recOf(A.id), 'title'), col(recOf(E.id), 'title')], ["'=SUM(1) overdue", "'+1 call done"]);
+    same('CSV RFC 4180 quoting round-trips quotes, commas, newlines', [col(recOf(Bt.id), 'title'), col(recOf(D.id), 'title')], ['Quote "x", comma', 'line one\nline two']);
+    same('CSV subtask: parent section + parent_task_id', [col(recOf(B1.id), 'section'), col(recOf(B1.id), 'parent_task_id')], ['In progress', Bt.id]);
+    same('CSV cells: assignee, priority, dates, completed', [col(recOf(A.id), 'assignee_email'), col(recOf(A.id), 'priority'), col(recOf(A.id), 'due_date'), col(recOf(A.id), 'completed'), col(recOf(C.id), 'completed'), col(recOf(D.id), 'section')], [aliceUser.email, 'HIGH', plusDays(zToday, -1), 'false', 'true', '']);
+    expect('GET tasks.csv as non-member → 404 (bob)', await bob('GET', `/projects/${p.id}/tasks.csv`), 404, ErrorBody);
+  } finally {
+    if (reportProjectId) expect('cleanup DELETE report project', await admin('DELETE', `/projects/${reportProjectId}`), 204);
+  }
+}
+
+/** Minimal RFC 4180 parser: quoted fields, doubled quotes, CRLF records. Counts bare LFs outside quotes. */
+function parseCsv(text) {
+  const records = [];
+  let field = '', record = [], quoted = false, bareLf = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else field += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') { record.push(field); field = ''; }
+    else if (ch === '\r' && text[i + 1] === '\n') { record.push(field); records.push(record); field = ''; record = []; i++; }
+    else if (ch === '\n') { bareLf++; record.push(field); records.push(record); field = ''; record = []; }
+    else field += ch;
+  }
+  if (field || record.length) { record.push(field); records.push(record); }
+  return { header: records[0] ?? [], records: records.slice(1), bareLf };
 }

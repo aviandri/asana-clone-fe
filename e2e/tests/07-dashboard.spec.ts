@@ -27,7 +27,9 @@ test('opens the project Dashboard tab and exports CSV', async ({ authedPage: pag
     ]);
     expect(download.suggestedFilename()).toMatch(/-tasks\.csv$/);
     const csv = await readFile((await download.path())!, 'utf8');
-    expect(csv.replace(/^﻿/, '').split(/\r?\n/)[0]).toBe(
+    // BE sends a UTF-8 BOM and CRLF line endings.
+    const header = csv.replace(/^\uFEFF/, '').split(/\r?\n/)[0];
+    expect(header).toBe(
       'id,title,section,parent_task_id,assignee_name,assignee_email,priority,start_date,due_date,completed,completed_at,created_at',
     );
   } finally {

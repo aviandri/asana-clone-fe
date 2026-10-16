@@ -1,8 +1,18 @@
-import { QueryClient } from '@tanstack/react-query';
+import { MutationCache, QueryClient } from '@tanstack/react-query';
 import { ApiError } from '@/api/client';
+import { errorMessage } from './errors';
+import { showToast } from './toast';
 
 export function createQueryClient() {
   return new QueryClient({
+    mutationCache: new MutationCache({
+      onError: (err, variables) => {
+        // Callers that render the error inline pass `quiet: true` in the variables.
+        if ((variables as { quiet?: boolean } | undefined)?.quiet) return;
+        if (err instanceof ApiError && err.status === 401) return; // handled by auth
+        showToast(errorMessage(err));
+      },
+    }),
     defaultOptions: {
       queries: {
         staleTime: 30_000,

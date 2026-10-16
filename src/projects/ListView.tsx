@@ -1,14 +1,18 @@
+import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import clsx from 'clsx';
 import { useMemo, useState } from 'react';
 import type { ProjectDetail, Section, Task } from '@/api/types';
 import { InlineText } from '@/components/InlineText';
 import { Popover } from '@/components/Popover';
-import { ChevronDownIcon, ChevronRightIcon, CommentIcon, DotsIcon, PlusIcon, SubtaskIcon } from '@/components/icons';
+import { ChevronDownIcon, ChevronRightIcon, CommentIcon, DotsIcon, GripIcon, PlusIcon, SubtaskIcon } from '@/components/icons';
 import { filterByCompletion, type CompletionFilter } from '@/lib/taskFilters';
 import { positionAtEnd } from '@/lib/position';
 import { AssigneeField, CompleteToggle, DueDateField, PrioritySelect } from '@/tasks/fields';
 import { useCreateTask, useUpdateTask } from '@/tasks/useTaskMutations';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
+import { NO_SECTION, useSectionDnd } from './useSectionDnd';
 import { useSectionMutations } from './useSectionMutations';
 
 const GRID = 'grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] items-center';
@@ -18,8 +22,14 @@ export function TaskRow({ task, canEdit }: { task: Task; canEdit: boolean }) {
   const panel = useTaskPanel();
   const [renaming, setRenaming] = useState(false);
   const selected = panel.taskId === task.id;
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+    id: task.id,
+    disabled: !canEdit,
+  });
   return (
     <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
       role="row"
       aria-selected={selected}
       data-testid={`task-row-${task.id}`}
@@ -28,9 +38,23 @@ export function TaskRow({ task, canEdit }: { task: Task; canEdit: boolean }) {
         GRID,
         'group cursor-pointer border-b border-gray-100 text-sm hover:bg-gray-50',
         selected && 'bg-blue-50 hover:bg-blue-50',
+        isDragging && 'opacity-40',
       )}
     >
-      <div role="cell" className="flex min-w-0 items-center gap-2 py-1.5 pl-6 pr-2">
+      <div role="cell" className="relative flex min-w-0 items-center gap-2 py-1.5 pl-6 pr-2">
+        {canEdit && (
+          <button
+            type="button"
+            ref={setActivatorNodeRef}
+            {...attributes}
+            {...listeners}
+            aria-label={`Move ${task.title}`}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute left-1 cursor-grab rounded p-0.5 text-gray-400 opacity-0 hover:bg-gray-200 focus:opacity-100 group-hover:opacity-100"
+          >
+            <GripIcon className="h-3.5 w-3.5" />
+          </button>
+        )}
         <CompleteToggle
           completed={task.completed}
           label={task.completed ? `Mark "${task.title}" incomplete` : `Mark "${task.title}" complete`}
@@ -88,7 +112,7 @@ export function TaskRow({ task, canEdit }: { task: Task; canEdit: boolean }) {
         <AssigneeField
           assignee={task.assignee}
           disabled={!canEdit}
-          onChange={(u) => update.mutateAsync({ id: task.id, patch: { assigneeId: u?.id ?? null }, assignee: u })}
+          onChange={(u) => update.mutateAsync({ id: task.id, patch: { assigneeId: u?.id ?? null }, assignee: u, quiet: true })}
         />
         <span className="md:hidden">
           <DueDateField
@@ -187,18 +211,22 @@ function SectionMenu({ onRename, onDelete }: { onRename: () => void; onDelete: (
 function SectionBlock({
   project,
   section,
-  tasks,
+  ids,
+  byId,
   canEdit,
   adding,
   setAdding,
 }: {
   project: ProjectDetail;
   section: Section | null;
-  tasks: Task[];
+  ids: string[];
+  byId: Map<string, Task>;
   canEdit: boolean;
   adding: boolean;
   setAdding: (v: boolean) => void;
 }) {
+  const tasks = ids.map((id) => byId.get(id)).filter((t): t is Task => !!t);
+  const { setNodeRef } = useDroppable({ id: section?.id ?? NO_SECTION });
   const [collapsed, setCollapsed] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const create = useCreateTask();
@@ -207,7 +235,7 @@ function SectionBlock({
   const headingId = `section-${section?.id ?? 'none'}`;
 
   return (
-    <section aria-labelledby={headingId} className="mb-2">
+    <section ref={setNodeRef} aria-labelledby={headingId} className="mb-2">
       <div className="group/section flex items-center gap-1 py-2 pl-1 pr-2">
         <button
           type="button"
@@ -267,9 +295,11 @@ function SectionBlock({
       </div>
       {!collapsed && (
         <div role="rowgroup">
-          {tasks.map((t) => (
-            <TaskRow key={t.id} task={t} canEdit={canEdit} />
-          ))}
+          <SortableContext id={section?.id ?? NO_SECTION} items={ids} strategy={verticalListSortingStrategy}>
+            {tasks.map((t) => (
+              <TaskRow key={t.id} task={t} canEdit={canEdit} />
+            ))}
+          </SortableContext>
           {adding && (
             <QuickAddRow
               onClose={() => setAdding(false)}
@@ -329,16 +359,18 @@ export function ListView({
   }
 
   const visible = useMemo(() => filterByCompletion(tasks, filter, keepIds), [tasks, filter, keepIds]);
-  const bySection = useMemo(() => {
-    const m = new Map<string, Task[]>();
-    for (const t of visible) {
-      const k = t.sectionId ?? '';
-      m.set(k, [...(m.get(k) ?? []), t]);
-    }
-    for (const list of m.values()) list.sort((a, b) => a.position - b.position);
-    return m;
-  }, [visible]);
-  const unsectioned = bySection.get('') ?? [];
+  const groups = useMemo(() => {
+    const g: Record<string, Task[]> = { [NO_SECTION]: [] };
+    for (const sec of project.sections) g[sec.id] = [];
+    for (const t of visible) (g[t.sectionId ?? NO_SECTION] ?? g[NO_SECTION]).push(t);
+    for (const list of Object.values(g)) list.sort((a, b) => a.position - b.position);
+    return g;
+  }, [visible, project.sections]);
+  const update = useUpdateTask();
+  const dnd = useSectionDnd(groups, (m) =>
+    update.mutate({ id: m.taskId, patch: { sectionId: m.sectionId, position: m.position } }),
+  );
+  const unsectionedIds = dnd.items[NO_SECTION] ?? [];
 
   return (
     <div role="table" aria-label={`${project.name} tasks`} className="min-w-0 pb-24">
@@ -353,27 +385,39 @@ export function ListView({
         </div>
       </div>
 
-      {(unsectioned.length > 0 || addingTo === '') && (
-        <SectionBlock
-          project={project}
-          section={null}
-          tasks={unsectioned}
-          canEdit={canEdit}
-          adding={addingTo === ''}
-          setAdding={(v) => setAddingTo(v ? '' : null)}
-        />
-      )}
-      {project.sections.map((s) => (
-        <SectionBlock
-          key={s.id}
-          project={project}
-          section={s}
-          tasks={bySection.get(s.id) ?? []}
-          canEdit={canEdit}
-          adding={addingTo === s.id}
-          setAdding={(v) => setAddingTo(v ? s.id : null)}
-        />
-      ))}
+      <DndContext {...dnd.dndProps}>
+        {(unsectionedIds.length > 0 || addingTo === '') && (
+          <SectionBlock
+            project={project}
+            section={null}
+            ids={unsectionedIds}
+            byId={dnd.byId}
+            canEdit={canEdit}
+            adding={addingTo === ''}
+            setAdding={(v) => setAddingTo(v ? '' : null)}
+          />
+        )}
+        {project.sections.map((s) => (
+          <SectionBlock
+            key={s.id}
+            project={project}
+            section={s}
+            ids={dnd.items[s.id] ?? []}
+            byId={dnd.byId}
+            canEdit={canEdit}
+            adding={addingTo === s.id}
+            setAdding={(v) => setAddingTo(v ? s.id : null)}
+          />
+        ))}
+        <DragOverlay>
+          {dnd.activeTask && (
+            <div className="flex items-center gap-2 rounded border border-gray-200 bg-white py-1.5 pl-6 pr-3 text-sm shadow-lg">
+              <GripIcon className="h-3.5 w-3.5 text-gray-400" />
+              {dnd.activeTask.title}
+            </div>
+          )}
+        </DragOverlay>
+      </DndContext>
 
       {canEdit &&
         (newSection ? (

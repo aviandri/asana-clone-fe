@@ -5,6 +5,7 @@ import { AppShell } from '@/layout/AppShell';
 import { AcceptInvitePage } from '@/pages/AcceptInvitePage';
 import { HomePage } from '@/pages/HomePage';
 import { LoginPage } from '@/pages/LoginPage';
+import { MyTasksPage } from '@/pages/MyTasksPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { PlaceholderPage } from '@/pages/PlaceholderPage';
 import { ProjectPage } from '@/projects/ProjectPage';
@@ -34,7 +35,7 @@ export const routes: RouteObject[] = [
         ),
         children: [
           { index: true, element: <HomePage /> },
-          { path: 'my-tasks', element: <PlaceholderPage title="My tasks" /> },
+          { path: 'my-tasks', element: <MyTasksPage /> },
           { path: 'inbox', element: <PlaceholderPage title="Inbox" /> },
           { path: 'teams', element: <PlaceholderPage title="Teams" /> },
           { path: 'teams/:teamId', element: <PlaceholderPage title="Team" /> },

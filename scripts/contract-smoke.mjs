@@ -23,8 +23,7 @@
 // deletes its own data in its `finally`. It marks at most one of alice's smoke notifications as read
 // and does not call read-all. Requires Node 20+ (global fetch, Headers#getSetCookie). Exit code 1 on
 // any failure.
-// Note: it performs 5 logins (the §11 CSV checks use a raw session); keep AUTH_RATE_LIMIT_MAX ≥ 6/min
-// for the test IP.
+// Note: it performs 4 logins; keep AUTH_RATE_LIMIT_MAX ≥ 5/min for the test IP.
 
 const ORIGIN = (process.env.BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const BASE = `${ORIGIN}/api/v1`;
@@ -131,10 +130,12 @@ function client(label) {
       const [pair] = c.split(';');
       if (pair.startsWith('sid=')) cookie = pair.endsWith('=') ? '' : pair;
     }
-    const text = await res.text();
+    // Raw bytes are kept for the CSV BOM check; TextDecoder strips a BOM like res.text() does.
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const text = new TextDecoder().decode(bytes);
     let json;
     try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
-    return { status: res.status, body: json, label };
+    return { status: res.status, body: json, label, headers: res.headers, bytes };
   };
 }
 
@@ -465,14 +466,6 @@ async function contractV11Reports({ aliceUser, bobUser, teamId }) {
   const zToday = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
   const plusDays = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
 
-  // The shared client decodes bodies with res.text(), which strips a BOM, and hides headers, so the
-  // CSV checks use their own raw session (one extra login).
-  let rawCookie = '';
-  const raw = async (path) => {
-    const res = await fetch(BASE + path, { headers: rawCookie ? { cookie: rawCookie } : {} });
-    return { status: res.status, headers: res.headers, bytes: new Uint8Array(await res.arrayBuffer()) };
-  };
-
   let reportProjectId;
   try {
     // ---- fixture: PRIVATE project, alice is an EDITOR, bob has no access ----
@@ -537,10 +530,8 @@ async function contractV11Reports({ aliceUser, bobUser, teamId }) {
     expect('workload range > 92 days → 400', await admin('GET', `/reports/workload?from=${zToday}&to=${plusDays(zToday, 92)}`), 400, ErrorBody);
     expect('workload unknown teamId → 404', await admin('GET', '/reports/workload?teamId=00000000-0000-4000-8000-000000000000'), 404, ErrorBody);
 
-    // ---- GET /projects/:id/tasks.csv (raw bytes) ----
-    const login = await fetch(`${BASE}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: ADMIN_EMAIL, password: PASSWORD }) });
-    rawCookie = (login.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).find((c) => c.startsWith('sid=')) ?? '';
-    const csvRes = await raw(`/projects/${p.id}/tasks.csv`);
+    // ---- GET /projects/:id/tasks.csv (raw bytes: `body` has the BOM decoded away) ----
+    const csvRes = await admin('GET', `/projects/${p.id}/tasks.csv`);
     const ctype = csvRes.headers.get('content-type') ?? '';
     const disp = csvRes.headers.get('content-disposition') ?? '';
     same('CSV 200 + text/csv; charset=utf-8 + attachment filename', [csvRes.status, /^text\/csv;\s*charset=utf-8$/i.test(ctype), disp], [200, true, 'attachment; filename="fe-smoke-report-q4-tasks.csv"']);
@@ -559,7 +550,6 @@ async function contractV11Reports({ aliceUser, bobUser, teamId }) {
     same('CSV cells: assignee, priority, dates, completed', [col(recOf(A.id), 'assignee_email'), col(recOf(A.id), 'priority'), col(recOf(A.id), 'due_date'), col(recOf(A.id), 'completed'), col(recOf(C.id), 'completed'), col(recOf(D.id), 'section')], [aliceUser.email, 'HIGH', plusDays(zToday, -1), 'false', 'true', '']);
     expect('GET tasks.csv as non-member → 404 (bob)', await bob('GET', `/projects/${p.id}/tasks.csv`), 404, ErrorBody);
   } finally {
-    if (rawCookie) await fetch(`${BASE}/auth/logout`, { method: 'POST', headers: { cookie: rawCookie } });
     if (reportProjectId) expect('cleanup DELETE report project', await admin('DELETE', `/projects/${reportProjectId}`), 204);
   }
 }

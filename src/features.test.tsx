@@ -45,6 +45,18 @@ describe('comments & activity', () => {
     expect(within(feed).getByRole('link', { name: 'https://ok.example/a' })).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });
 
+  it('labels mention chips by user id, not the (spoofable) name in the body', async () => {
+    const db = setupMockApi(ADMIN);
+    const task = db.tasks.find((t) => t.title === 'Pick a font pairing')!;
+    const bob = db.users.find((x) => x.email === BOB)!;
+    db.comments.push({ id: 'c-spoof', taskId: task.id, authorId: db.users[1].id, body: `ask @[CEO](${bob.id}) and @[Ghost](no-such-user)`, createdAt: new Date().toISOString(), editedAt: null });
+    renderApp(`/projects/${task.projectId}/list?task=${task.id}`, { db });
+    const feed = await screen.findByRole('region', { name: 'Comments and activity' });
+    expect(await within(feed).findByText('@Bob Brown')).toHaveAttribute('data-user-id', bob.id);
+    expect(within(feed).queryByText('@CEO')).not.toBeInTheDocument();
+    expect(within(feed).getByText('@Ghost')).toBeInTheDocument();
+  });
+
   it('edits and deletes my own comment', async () => {
     const { db, dialog } = await openTask('Pick a font pairing');
     const u = user();

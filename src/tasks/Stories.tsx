@@ -13,9 +13,15 @@ import { activeMentionQuery, mentionMarkup, tokenizeBody } from '@/lib/mentions'
 import { PRIORITY_LABEL } from '@/lib/priority';
 import { useCommentMutations } from './useCommentMutations';
 
-/** Renders a comment body safely: text, @mention chips and http(s) links — never raw HTML. */
+/**
+ * Renders a comment body safely: text, @mention chips and http(s) links — never raw HTML.
+ * Chip labels come from the users list by id (the name in the body is author-controlled and could
+ * be spoofed, e.g. `@[CEO](<bob's id>)`); the body name is only a fallback for unknown users.
+ */
 export function CommentBody({ body }: { body: string }) {
   const tokens = useMemo(() => tokenizeBody(body), [body]);
+  const users = useUsers();
+  const nameFor = (userId: string, fallback: string) => users.data?.find((u) => u.id === userId)?.name ?? fallback;
   return (
     <p className="whitespace-pre-wrap break-words text-sm text-gray-800">
       {tokens.map((t, i) => (
@@ -23,7 +29,7 @@ export function CommentBody({ body }: { body: string }) {
           {t.kind === 'text' && t.text}
           {t.kind === 'mention' && (
             <span className="rounded bg-blue-50 px-0.5 font-medium text-blue-700" data-user-id={t.userId}>
-              @{t.name}
+              @{nameFor(t.userId, t.name)}
             </span>
           )}
           {t.kind === 'link' && (

@@ -7,6 +7,7 @@ import type {
   Story,
 } from '@/api/types';
 import { goalRoutes } from './goals';
+import { reportRoutes } from './reports';
 import { uid, type MockDb, type ProjectRow, type TaskRow, type UserRow } from './db';
 
 import {
@@ -873,7 +874,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   ],
 ];
 
-const compiled = [...routes, ...goalRoutes].map(([method, pattern, handler, opts]) => {
+const compiled = [...routes, ...goalRoutes, ...reportRoutes].map(([method, pattern, handler, opts]) => {
   const keys: string[] = [];
   const re = new RegExp(
     '^' +
@@ -886,7 +887,7 @@ const compiled = [...routes, ...goalRoutes].map(([method, pattern, handler, opts
   return { method, re, keys, handler, isPublic: !!opts?.public };
 });
 
-export type MockResponse = { status: number; body?: unknown };
+export type MockResponse = Result;
 
 /** Route a request against the mock DB. Mutates `db`. */
 export function handleMockRequest(
@@ -935,6 +936,11 @@ export function createMockFetch(
     const res = handleMockRequest(db, method, path, url.searchParams, body);
     if (method !== 'GET') opts.onChange?.(db);
     // Clone through JSON so callers can't mutate DB rows by reference.
+    if (res.raw !== undefined) {
+      const headers: Record<string, string> = { 'Content-Type': res.contentType ?? 'text/plain' };
+      if (res.filename) headers['Content-Disposition'] = `attachment; filename="${res.filename}"`;
+      return new Response(res.raw, { status: res.status, headers });
+    }
     const text = res.body === undefined ? null : JSON.stringify(res.body);
     return new Response(res.status === 204 ? null : text, {
       status: res.status,

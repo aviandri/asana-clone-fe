@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { STORAGE_STATE } from './paths';
 
 /**
  * Smoke tests against a running stack. Prereqs (see e2e/README.md):
@@ -11,6 +12,7 @@ const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
 
 export default defineConfig({
   testDir: './tests',
+  globalSetup: './global-setup.ts',
   outputDir: './test-results',
   fullyParallel: false,
   workers: 1,
@@ -22,6 +24,8 @@ export default defineConfig({
     : [['list']],
   use: {
     baseURL,
+    // Logged in as the seed admin by default; 01-auth opts out.
+    storageState: STORAGE_STATE,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',

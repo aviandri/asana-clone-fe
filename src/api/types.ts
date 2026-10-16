@@ -1,0 +1,181 @@
+// Response/request shapes from docs/SPEC.md §5–6. Keep in sync with the BE contract.
+
+export type Role = 'ADMIN' | 'MEMBER';
+export type Privacy = 'PUBLIC' | 'TEAM' | 'PRIVATE';
+export type ProjectView = 'LIST' | 'BOARD' | 'CALENDAR';
+export type ProjectRole = 'OWNER' | 'EDITOR' | 'COMMENTER';
+export type Priority = 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH';
+export type NotificationType = 'ASSIGNED' | 'COMMENTED' | 'COMPLETED' | 'MENTIONED';
+export type ActivityType =
+  | 'CREATED'
+  | 'COMPLETED'
+  | 'REOPENED'
+  | 'ASSIGNED'
+  | 'UNASSIGNED'
+  | 'DUE_DATE_CHANGED'
+  | 'MOVED_SECTION'
+  | 'RENAMED'
+  | 'PRIORITY_CHANGED'
+  | 'DESCRIPTION_CHANGED';
+
+export type UserSummary = { id: string; name: string; email: string; avatarColor: string };
+export type User = UserSummary & { role: Role; isActive: boolean; createdAt: string };
+
+export type Team = {
+  id: string;
+  name: string;
+  description: string | null;
+  memberCount: number;
+  createdAt: string;
+};
+export type TeamDetail = Team & { members: UserSummary[] };
+
+export type Section = { id: string; projectId: string; name: string; position: number };
+
+export type Project = {
+  id: string;
+  teamId: string;
+  name: string;
+  description: string | null;
+  color: string;
+  privacy: Privacy;
+  archived: boolean;
+  defaultView: ProjectView;
+  owner: UserSummary;
+  createdAt: string;
+  updatedAt: string;
+  /** null = access via team/public */
+  myRole: ProjectRole | null;
+};
+export type ProjectMember = { user: UserSummary; role: ProjectRole };
+export type ProjectDetail = Project & {
+  sections: Section[];
+  members: ProjectMember[];
+  team: { id: string; name: string };
+};
+
+export type TaskProjectRef = { id: string; name: string; color: string };
+
+export type Task = {
+  id: string;
+  projectId: string | null;
+  sectionId: string | null;
+  parentId: string | null;
+  title: string;
+  description: string | null;
+  assignee: UserSummary | null;
+  creator: UserSummary;
+  /** YYYY-MM-DD */
+  dueDate: string | null;
+  /** YYYY-MM-DD */
+  startDate: string | null;
+  priority: Priority;
+  completed: boolean;
+  completedAt: string | null;
+  position: number;
+  subtaskCount: number;
+  completedSubtaskCount: number;
+  commentCount: number;
+  project: TaskProjectRef | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type TaskDetail = Task & {
+  followers: UserSummary[];
+  subtasks: Task[];
+  parent: { id: string; title: string } | null;
+};
+
+export type CommentStory = {
+  kind: 'comment';
+  id: string;
+  author: UserSummary;
+  body: string;
+  createdAt: string;
+  editedAt: string | null;
+};
+export type ActivityStory = {
+  kind: 'activity';
+  id: string;
+  actor: UserSummary;
+  type: ActivityType | string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any;
+  createdAt: string;
+};
+export type Story = CommentStory | ActivityStory;
+
+export type Notification = {
+  id: string;
+  type: NotificationType;
+  read: boolean;
+  createdAt: string;
+  actor: UserSummary;
+  task: { id: string; title: string; projectId: string | null } | null;
+};
+
+export type Invite = {
+  id: string;
+  email: string;
+  role: Role;
+  token: string;
+  inviteUrl: string;
+  expiresAt: string;
+};
+
+export type ListResponse<T> = { data: T[] };
+export type NotificationsResponse = { data: Notification[]; unreadCount: number };
+export type SearchResponse = { tasks: Task[]; projects: Project[]; users: UserSummary[] };
+
+export type ErrorCode =
+  | 'NOT_FOUND'
+  | 'VALIDATION'
+  | 'UNAUTHORIZED'
+  | 'FORBIDDEN'
+  | 'CONFLICT'
+  | 'INTERNAL';
+export type ErrorBody = { error: { code: ErrorCode; message: string; details?: unknown } };
+
+// ---- Request bodies ----
+
+export type CreateProjectInput = {
+  teamId: string;
+  name: string;
+  description?: string;
+  color?: string;
+  privacy?: Privacy;
+  defaultView?: ProjectView;
+};
+export type UpdateProjectInput = Partial<{
+  name: string;
+  description: string | null;
+  color: string;
+  privacy: Privacy;
+  archived: boolean;
+  defaultView: ProjectView;
+}>;
+
+export type CreateTaskInput = {
+  title: string;
+  projectId?: string | null;
+  sectionId?: string | null;
+  parentId?: string | null;
+  description?: string | null;
+  assigneeId?: string | null;
+  dueDate?: string | null;
+  startDate?: string | null;
+  priority?: Priority;
+  position?: number;
+};
+export type UpdateTaskInput = Partial<{
+  title: string;
+  description: string | null;
+  projectId: string | null;
+  sectionId: string | null;
+  assigneeId: string | null;
+  dueDate: string | null;
+  startDate: string | null;
+  priority: Priority;
+  completed: boolean;
+  position: number;
+}>;

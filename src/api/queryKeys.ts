@@ -1,0 +1,16 @@
+export const qk = {
+  me: ['me'] as const,
+  users: (q = '') => ['users', q] as const,
+  teams: (mine = false) => ['teams', { mine }] as const,
+  team: (id: string) => ['team', id] as const,
+  projects: (filters: { teamId?: string; archived?: boolean } = {}) => ['projects', filters] as const,
+  project: (id: string) => ['project', id] as const,
+  projectTasks: (id: string) => ['projectTasks', id] as const,
+  myTasks: ['myTasks'] as const,
+  task: (id: string) => ['task', id] as const,
+  stories: (taskId: string) => ['stories', taskId] as const,
+  notifications: ['notifications'] as const,
+  search: (q: string) => ['search', q] as const,
+  adminUsers: ['adminUsers'] as const,
+  adminInvites: ['adminInvites'] as const,
+};

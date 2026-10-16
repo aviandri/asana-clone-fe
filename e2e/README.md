@@ -32,12 +32,13 @@ The tests use accessible roles and names, not CSS classes or test ids. The UI mu
 | Create project | trigger | button matching `/new project/i` (first one on `/` is used) |
 | | form | `role="dialog"` with a field labelled `/name/i` and a button matching `/create/i` |
 | Project page | title | `<h1>` = project name; URL `/projects/:id[/:view]`, views `list` and `board` |
-| List view | add task | button matching `/add task/i` → textbox named `/task name/i`, saved on Enter |
+| List view | table | `role="table"` named `<project name> tasks`; each task title is a button (name = title) in its row |
+| | add task | toolbar button `Add task` (exact) → textbox `New task name`, saved on Enter |
 | Board view | columns | each section is `role="region"` with `aria-label` = section name; cards show the task title |
 | | drag & drop | dnd-kit PointerSensor; an activation distance of 10px or less is fine |
-| Task detail | panel | opened by clicking the task title; `role="dialog"` with accessible name = task title |
+| Task detail | panel | opened by a single click on the title (or `?task=<id>`); `role="dialog"` named by task title |
 | | comment | textbox named `/comment/i` and a button named exactly `Comment` |
 
-Login and shell are already implemented this way. The rest is the contract for the upcoming
-project, list, board and task-detail screens. If the UI ends up differing, update the spec
+Login, shell, list view and task panel are implemented this way (FE#5). Create-project, board and
+the comment box are still contract-only. If the UI ends up differing, update the spec
 selectors in the same PR.

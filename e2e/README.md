@@ -17,7 +17,8 @@ npx playwright install chromium
 # against another deployment, e.g. the compose stack:
 E2E_BASE_URL=http://localhost:8080 npm run e2e
 ```
-Specs create their own uniquely named projects through the API and delete them afterwards, so
+Global setup logs in once as the seed admin (login is rate-limited to 10/min per IP) and every
+spec reuses that session, except `01-auth`, which starts logged out. Specs create their own uniquely named projects through the API and delete them afterwards, so
 they can run repeatedly against the same seeded DB. On failure, traces land in
 `e2e/test-results/`; open them with `npx playwright show-trace <zip>`.
 

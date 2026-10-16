@@ -17,10 +17,6 @@ export class Api {
     return (await res.json()) as T;
   }
 
-  async login(email = ADMIN.email, password = ADMIN.password) {
-    return this.json(await this.request.post('/api/v1/auth/login', { data: { email, password } }));
-  }
-
   async firstTeamId(): Promise<string> {
     const { data } = await this.json<{ data: { id: string }[] }>(await this.request.get('/api/v1/teams'));
     expect(data.length, 'seed data should include at least one team').toBeGreaterThan(0);
@@ -74,9 +70,8 @@ export const test = base.extend<{ api: Api; authedPage: Page }>({
   api: async ({ page }, provide) => {
     await provide(new Api(page.request));
   },
-  /** A page already logged in as the seed admin (API login; the cookie is shared with the page). */
-  authedPage: async ({ page, api }, provide) => {
-    await api.login();
+  /** The default page, already logged in as the seed admin via the global-setup storage state. */
+  authedPage: async ({ page }, provide) => {
     await provide(page);
   },
 });

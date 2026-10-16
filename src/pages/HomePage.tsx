@@ -20,7 +20,7 @@ export function HomePage() {
   const now = new Date();
   const myTasks = useQuery({
     queryKey: qk.myTasks,
-    queryFn: () => tasksApi.mine({ completed: false }).then((r) => r.data),
+    queryFn: () => tasksApi.mine().then((r) => r.data),
   });
   const projects = useProjects();
 

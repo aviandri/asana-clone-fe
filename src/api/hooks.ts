@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { notificationsApi, projectsApi, teamsApi } from './endpoints';
+import { notificationsApi, projectsApi, tasksApi, teamsApi, usersApi } from './endpoints';
 import { qk } from './queryKeys';
 
 export function useTeams() {
@@ -27,5 +27,29 @@ export function useNotifications() {
     queryFn: () => notificationsApi.list({ limit: 50 }),
     // No websockets in v1 — poll for new notifications.
     refetchInterval: 60_000,
+  });
+}
+
+export function useUsers() {
+  return useQuery({
+    queryKey: qk.users(),
+    queryFn: () => usersApi.list().then((r) => r.data),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useProjectTasks(projectId: string | undefined) {
+  return useQuery({
+    queryKey: qk.projectTasks(projectId ?? ''),
+    queryFn: () => projectsApi.tasks(projectId!).then((r) => r.data),
+    enabled: !!projectId,
+  });
+}
+
+export function useTask(id: string | null | undefined) {
+  return useQuery({
+    queryKey: qk.task(id ?? ''),
+    queryFn: () => tasksApi.get(id!),
+    enabled: !!id,
   });
 }

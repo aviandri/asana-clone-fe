@@ -1,12 +1,17 @@
 import { Outlet, type RouteObject } from 'react-router-dom';
+import { AdminPage } from '@/admin/AdminPage';
 import { AuthProvider } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAdmin, RequireAuth } from '@/auth/guards';
 import { AppShell } from '@/layout/AppShell';
 import { AcceptInvitePage } from '@/pages/AcceptInvitePage';
 import { HomePage } from '@/pages/HomePage';
+import { InboxPage } from '@/pages/InboxPage';
 import { LoginPage } from '@/pages/LoginPage';
+import { MyTasksPage } from '@/pages/MyTasksPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
-import { PlaceholderPage } from '@/pages/PlaceholderPage';
+import { ProjectPage } from '@/projects/ProjectPage';
+import { TeamPage } from '@/teams/TeamPage';
+import { TeamsPage } from '@/teams/TeamsPage';
 
 export const routes: RouteObject[] = [
   {
@@ -33,16 +38,16 @@ export const routes: RouteObject[] = [
         ),
         children: [
           { index: true, element: <HomePage /> },
-          { path: 'my-tasks', element: <PlaceholderPage title="My tasks" /> },
-          { path: 'inbox', element: <PlaceholderPage title="Inbox" /> },
-          { path: 'teams', element: <PlaceholderPage title="Teams" /> },
-          { path: 'teams/:teamId', element: <PlaceholderPage title="Team" /> },
-          { path: 'projects/:projectId/:view?', element: <PlaceholderPage title="Project" /> },
+          { path: 'my-tasks', element: <MyTasksPage /> },
+          { path: 'inbox', element: <InboxPage /> },
+          { path: 'teams', element: <TeamsPage /> },
+          { path: 'teams/:teamId', element: <TeamPage /> },
+          { path: 'projects/:projectId/:view?', element: <ProjectPage /> },
           {
             path: 'admin',
             element: (
               <RequireAdmin>
-                <PlaceholderPage title="Admin" />
+                <AdminPage />
               </RequireAdmin>
             ),
           },

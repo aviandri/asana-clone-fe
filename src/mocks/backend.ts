@@ -3,6 +3,7 @@
 // faithful enough that the UI can be developed and tested against it.
 import type {
   ErrorCode,
+  Invite,
   Notification,
   Project,
   ProjectDetail,
@@ -21,6 +22,7 @@ class HttpError extends Error {
     public status: number,
     public code: ErrorCode,
     message: string,
+    public details?: unknown,
   ) {
     super(message);
   }
@@ -192,6 +194,21 @@ function assertCanEditTask(db: MockDb, t: TaskRow, me: UserRow) {
   if (!t.projectId) return;
   assertCanEditProjectContent(db, db.projects.find((p) => p.id === t.projectId)!, me);
 }
+/** 400 VALIDATION when `user` couldn't see the task's project (assigning / adding followers). */
+function assertCanSeeTaskProject(db: MockDb, t: TaskRow, user: UserRow, field: string) {
+  if (!t.projectId) return;
+  const p = db.projects.find((x) => x.id === t.projectId)!;
+  if (!canSeeProject(db, p, user)) {
+    const message = `${user.name} doesn’t have access to this project`;
+    // Same shape as the BE (zod issues): [{ path: [field], message }]
+    throw new HttpError(400, 'VALIDATION', message, [{ path: [field], message }]);
+  }
+}
+
+function assertNotLastOwner(db: MockDb, projectId: string) {
+  const owners = db.projectMembers.filter((m) => m.projectId === projectId && m.role === 'OWNER');
+  if (owners.length <= 1) throw new HttpError(409, 'CONFLICT', 'A project must keep at least one owner');
+}
 const requireAdmin = (me: UserRow) => {
   if (me.role !== 'ADMIN') throw forbidden();
 };
@@ -234,6 +251,7 @@ function mentionedIds(body: string) {
   return [...body.matchAll(MENTION_RE)].map((m) => m[2]);
 }
 
+const LOGIN_ATTEMPT_LIMIT = 5;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const PRIORITIES = ['NONE', 'LOW', 'MEDIUM', 'HIGH'];
 
@@ -258,7 +276,7 @@ function applyTaskPatch(db: MockDb, t: TaskRow, body: Record<string, unknown>, m
   }
   if ('assigneeId' in body) {
     const a = body.assigneeId as string | null;
-    if (a) userById(db, a);
+    if (a) assertCanSeeTaskProject(db, t, userById(db, a), 'assigneeId');
     t.assigneeId = a;
   }
   if ('projectId' in body) {
@@ -357,6 +375,29 @@ function serializeStory(db: MockDb, s: { kind: 'comment' | 'activity'; row: unkn
   };
 }
 
+function serializeInvite(db: MockDb, i: MockDb['invites'][number]): Invite {
+  const inviter = db.users.find((u) => u.id === i.invitedById);
+  return {
+    id: i.id,
+    email: i.email,
+    role: i.role,
+    token: i.token,
+    inviteUrl: `${location.origin}/invite/${i.token}`,
+    expiresAt: i.expiresAt,
+    createdAt: i.createdAt,
+    ...(inviter && { invitedBy: summary(inviter) }),
+  };
+}
+
+/** 404 for unknown tokens; 410 GONE for used or expired ones. */
+function usableInvite(db: MockDb, token: string) {
+  const inv = db.invites.find((i) => i.token === token);
+  if (!inv) throw notFound();
+  if (inv.acceptedAt) throw new HttpError(410, 'GONE', 'Invite has already been used');
+  if (new Date(inv.expiresAt) < new Date()) throw new HttpError(410, 'GONE', 'Invite has expired');
+  return inv;
+}
+
 const bool = (v: string | null) => (v === null ? undefined : v === 'true');
 
 // ---------- routes ----------
@@ -370,9 +411,15 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     '/auth/login',
     ({ db, body }) => {
       const email = String(body?.email ?? '').toLowerCase();
+      const failures = (db.loginFailures ??= {});
+      if ((failures[email] ?? 0) >= LOGIN_ATTEMPT_LIMIT)
+        throw new HttpError(429, 'RATE_LIMITED', 'Too many login attempts. Try again later.');
       const u = db.users.find((x) => x.email === email);
-      if (!u || u.password !== body?.password || !u.isActive)
+      if (!u || u.password !== body?.password || !u.isActive) {
+        failures[email] = (failures[email] ?? 0) + 1;
         throw new HttpError(401, 'UNAUTHORIZED', 'Invalid email or password');
+      }
+      delete failures[email];
       db.sessionUserId = u.id;
       return fullUser(u);
     },
@@ -392,9 +439,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     'GET',
     '/auth/invites/:token',
     ({ db, params }) => {
-      const inv = db.invites.find((i) => i.token === params.token && !i.acceptedAt);
-      if (!inv) throw notFound();
-      if (new Date(inv.expiresAt) < new Date()) throw new HttpError(410, 'NOT_FOUND', 'Invite expired');
+      const inv = usableInvite(db, params.token);
       return { email: inv.email, role: inv.role };
     },
     { public: true },
@@ -403,9 +448,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     'POST',
     '/auth/accept-invite',
     ({ db, body }) => {
-      const inv = db.invites.find((i) => i.token === body?.token && !i.acceptedAt);
-      if (!inv) throw notFound();
-      if (new Date(inv.expiresAt) < new Date()) throw new HttpError(410, 'NOT_FOUND', 'Invite expired');
+      const inv = usableInvite(db, String(body?.token ?? ''));
       const name = String(body?.name ?? '').trim();
       const password = String(body?.password ?? '');
       if (!name) throw invalid('name is required');
@@ -486,7 +529,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       return {
         data: db.invites
           .filter((i) => !i.acceptedAt)
-          .map((i) => ({ ...i, inviteUrl: `${location.origin}/invite/${i.token}` })),
+          .map((i) => serializeInvite(db, i)),
       };
     },
   ],
@@ -507,10 +550,10 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
         invitedById: me!.id,
         expiresAt: new Date(Date.now() + 7 * 864e5).toISOString(),
         acceptedAt: null,
+        createdAt: nowIso(),
       };
       db.invites.push(inv);
-      const { invitedById: _i, acceptedAt: _a, ...rest } = inv;
-      return { status: 201, body: { ...rest, inviteUrl: `${location.origin}/invite/${token}` } };
+      return { status: 201, body: serializeInvite(db, inv) };
     },
   ],
   [
@@ -630,6 +673,8 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       const name = String(body?.name ?? '').trim();
       if (!name) throw invalid('name is required');
       if (!db.teams.some((t) => t.id === body.teamId)) throw invalid('teamId is invalid');
+      const inTeam = db.teamMembers.some((m) => m.teamId === body.teamId && m.userId === me!.id);
+      if (!inTeam && me!.role !== 'ADMIN') throw forbidden();
       const p: ProjectRow = {
         id: uid(db, 'proj'),
         teamId: body.teamId,
@@ -686,6 +731,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       assertProjectOwner(db, p, me!);
       userById(db, body.userId);
       const existing = db.projectMembers.find((m) => m.projectId === p.id && m.userId === body.userId);
+      if (existing?.role === 'OWNER' && body.role !== 'OWNER') assertNotLastOwner(db, p.id);
       if (existing) existing.role = body.role;
       else db.projectMembers.push({ projectId: p.id, userId: body.userId, role: body.role ?? 'EDITOR' });
       return serializeProjectDetail(db, p, me!);
@@ -699,6 +745,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       assertProjectOwner(db, p, me!);
       const m = db.projectMembers.find((x) => x.projectId === p.id && x.userId === params.userId);
       if (!m) throw notFound();
+      if (m.role === 'OWNER' && body.role !== 'OWNER') assertNotLastOwner(db, p.id);
       m.role = body.role;
       return serializeProjectDetail(db, p, me!);
     },
@@ -709,6 +756,8 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     ({ db, me, params }) => {
       const p = visibleProject(db, params.id, me!);
       assertProjectOwner(db, p, me!);
+      const target = db.projectMembers.find((m) => m.projectId === p.id && m.userId === params.userId);
+      if (target?.role === 'OWNER') assertNotLastOwner(db, p.id);
       db.projectMembers = db.projectMembers.filter(
         (m) => !(m.projectId === p.id && m.userId === params.userId),
       );
@@ -857,7 +906,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     '/tasks/:id/followers',
     ({ db, me, params, body }) => {
       const t = visibleTask(db, params.id, me!);
-      userById(db, body.userId);
+      assertCanSeeTaskProject(db, t, userById(db, body.userId), 'userId');
       follow(db, t.id, body.userId);
       return serializeTaskDetail(db, t);
     },
@@ -1036,7 +1085,8 @@ export function handleMockRequest(
     return { status: 200, body: out };
   } catch (e) {
     if (e instanceof HttpError) {
-      return { status: e.status, body: { error: { code: e.code, message: e.message } } };
+      const error = { code: e.code, message: e.message, ...(e.details !== undefined && { details: e.details }) };
+      return { status: e.status, body: { error } };
     }
     return {
       status: 500,

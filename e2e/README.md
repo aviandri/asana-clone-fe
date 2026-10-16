@@ -1,7 +1,8 @@
 # E2E smoke tests (Playwright)
 
-Five specs covering the golden path: login/logout, create project, add task (list view), move a
-task across board columns (drag and drop), comment on a task. Chromium only, `workers: 1`.
+Seven specs covering the golden path: login/logout, create project, add task (list view), move a
+task across board columns (drag and drop), comment on a task, and for v1.1 create an aligned goal
+and update a key result, then open the project Dashboard and export CSV. Chromium only, `workers: 1`.
 
 ## Running locally
 ```sh
@@ -38,6 +39,13 @@ The tests use accessible roles and names, not CSS classes or test ids. The UI mu
 | | drag & drop | dnd-kit PointerSensor; an activation distance of 10px or less is fine |
 | Task detail | panel | opened by a single click on the title (or `?task=<id>`); `role="dialog"` named by task title |
 | | comment | textbox named `/comment/i` and a button named exactly `Comment` |
+| **v1.1** Goals `/goals` | new goal | button `New goal` → `role="dialog"` named `New goal` with fields labelled `Goal title` and `Parent goal` (a `<select>`, options = goal titles; time period defaults to the current quarter) and button `Create goal` |
+| | tree | `role="tree"` named `Goals`; each goal is a `treeitem` named by its title, children nested inside their parent's `treeitem` |
+| Goal detail `/goals/:id` | KR value | input labelled `<KR title> current value`, saved on Enter (or blur) |
+| **v1.1** Project dashboard | tab | link `Dashboard` in `<nav aria-label="Project views">` → `/projects/:id/dashboard` |
+| | KPI tiles | each tile `role="group"` named exactly `Total tasks` / `Completed` / `Overdue` (more allowed), containing the number |
+| | export | link or button `Export CSV` that triggers a file download |
 
-All of it is implemented on FE `main`, and the specs use the exact names it ships with. If the UI ends up differing, update the spec
+Everything up to the v1.1 rows is implemented on FE `main`. The v1.1 rows (specs 06–07) are
+the contract for the Goals and Dashboard screens being built now. If the UI ends up differing, update the spec
 selectors in the same PR.

@@ -7,6 +7,15 @@ type Section = { id: string; name: string; position: number };
 type ProjectDetail = { id: string; name: string; sections: Section[] };
 type Task = { id: string; title: string; sectionId: string | null };
 type Story = { kind: string; body?: string };
+type KeyResult = { id: string; title: string; currentValue: number; progress: number };
+type GoalDetail = {
+  id: string;
+  title: string;
+  parentId: string | null;
+  progress: number;
+  keyResults: KeyResult[];
+  children: { id: string; title: string }[];
+};
 
 /** Thin client over /api/v1 sharing the page's cookie jar (page.request), for setup and asserts. */
 export class Api {
@@ -36,8 +45,12 @@ export class Api {
     return (await this.json<{ data: Task[] }>(await this.request.get(`/api/v1/projects/${projectId}/tasks`))).data;
   }
 
-  async createTask(input: { title: string; projectId: string; sectionId?: string }): Promise<Task> {
+  async createTask(input: { title: string; projectId: string; sectionId?: string; dueDate?: string }): Promise<Task> {
     return this.json(await this.request.post('/api/v1/tasks', { data: input }));
+  }
+
+  async updateTask(id: string, patch: { completed?: boolean }): Promise<Task> {
+    return this.json(await this.request.patch(`/api/v1/tasks/${id}`, { data: patch }));
   }
 
   async getTask(id: string): Promise<Task> {
@@ -51,6 +64,46 @@ export class Api {
   async deleteProject(id: string) {
     await this.request.delete(`/api/v1/projects/${id}`);
   }
+
+  // ---- Goals (SPEC §10) ----
+
+  async createGoal(input: { title: string; timePeriod: string; parentId?: string }): Promise<GoalDetail> {
+    return this.json(await this.request.post('/api/v1/goals', { data: input }));
+  }
+
+  async getGoal(id: string): Promise<GoalDetail> {
+    return this.json(await this.request.get(`/api/v1/goals/${id}`));
+  }
+
+  async findGoalByTitle(title: string): Promise<{ id: string; title: string; parentId: string | null } | undefined> {
+    const { data } = await this.json<{ data: { id: string; title: string; parentId: string | null }[] }>(
+      await this.request.get('/api/v1/goals', { params: { q: title } }),
+    );
+    return data.find((g) => g.title === title);
+  }
+
+  async createKeyResult(
+    goalId: string,
+    input: { title: string; metricType: 'NUMBER' | 'PERCENT' | 'CURRENCY' | 'BOOLEAN'; startValue?: number; targetValue: number },
+  ): Promise<KeyResult> {
+    return this.json(await this.request.post(`/api/v1/goals/${goalId}/key-results`, { data: input }));
+  }
+
+  async deleteGoal(id: string) {
+    await this.request.delete(`/api/v1/goals/${id}`);
+  }
+}
+
+/** Current quarter as a SPEC §10 timePeriod (`YYYY-Qn`), the Goals page's default filter. */
+export function currentQuarter(now = new Date()): string {
+  return `${now.getFullYear()}-Q${Math.floor(now.getMonth() / 3) + 1}`;
+}
+
+/** `YYYY-MM-DD`, offset by `days` from today (local time). */
+export function isoDate(days = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /** Unique per run so reruns against the same DB don't collide. */

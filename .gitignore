@@ -3,3 +3,7 @@ dist/
 .env
 coverage/
 *.log
+
+# Playwright
+e2e/test-results/
+e2e/playwright-report/

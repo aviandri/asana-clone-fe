@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { MenuIcon } from '@/components/icons';
 import { Toaster } from '@/components/Toaster';
+import { SearchPalette } from '@/search/SearchPalette';
 import { TaskPanel } from '@/tasks/TaskPanel';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
 
@@ -10,6 +11,19 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const { taskId } = useTaskPanel();
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Global search: Cmd/Ctrl+K (works even while typing elsewhere).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((o) => !o);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   // Close the mobile drawer on navigation.
   useEffect(() => setMobileOpen(false), [location.pathname]);
@@ -18,14 +32,14 @@ export function AppShell() {
     <div className="flex h-full overflow-hidden">
       {/* Desktop sidebar */}
       <div className="hidden w-60 shrink-0 md:block">
-        <Sidebar />
+        <Sidebar onSearch={() => setSearchOpen(true)} />
       </div>
       {/* Mobile drawer */}
       {mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
           <div className="relative h-full w-64">
-            <Sidebar />
+            <Sidebar onSearch={() => setSearchOpen(true)} />
           </div>
         </div>
       )}
@@ -49,6 +63,7 @@ export function AppShell() {
           )}
         </div>
       </div>
+      <SearchPalette open={searchOpen} onClose={() => setSearchOpen(false)} />
       <Toaster />
     </div>
   );

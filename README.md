@@ -34,9 +34,19 @@ On the shared dev box, wrap heavy commands with `/home/claude/projects/asana-clo
 src/
   api/        types.ts (SPEC §5 shapes), client.ts (fetch wrapper + ApiError), endpoints.ts, hooks.ts, queryKeys.ts
   auth/       AuthProvider (session via GET /auth/me), route guards
-  layout/     AppShell + Sidebar
-  pages/      route components
-  components/ shared UI
+  layout/     AppShell (task panel host, ⌘K search, toasts), Sidebar, ProfileDialog
+  pages/      Home, Login, AcceptInvite, MyTasks, Inbox
+  projects/   ProjectPage + List/Board/Calendar views, DnD hook, settings & new-project dialogs
+  tasks/      TaskPanel (?task=<id>), fields, stories/comments + @mention composer, mutations
+  teams/      Teams browse + team page
+  admin/      Users & invites
+  search/     ⌘K / Ctrl+K palette
+  components/ shared UI (Modal, Popover, InlineText, Avatar, …)
+  lib/        dates, positions, buckets, mentions (safe tokeniser), permissions, toasts
   mocks/      in-memory implementation of the API contract (dev mock mode + tests)
   test/       test setup and helpers (renderApp, setupMockApi)
+scripts/      contract-smoke.mjs (FE↔BE contract test against a running backend; on the PR 3 stack)
 ```
+
+Keyboard: `⌘K`/`Ctrl+K` search · `Esc` closes the task panel/dialogs · double-click or `F2` renames a task in a list ·
+`Space` picks up/drops a focused board card (arrows move) · `⌘/Ctrl+Enter` posts a comment.

@@ -6,6 +6,8 @@ import type { Project, Team } from '@/api/types';
 import { useAuth, useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
 import { Logo } from '@/components/Logo';
+import { NewProjectDialog } from '@/projects/NewProjectDialog';
+import { ProfileDialog } from './ProfileDialog';
 import {
   BellIcon,
   CheckCircleIcon,
@@ -13,8 +15,12 @@ import {
   ChevronRightIcon,
   HomeIcon,
   LogoutIcon,
+  PlusIcon,
+  SearchIcon,
   ShieldIcon,
 } from '@/components/icons';
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
 function NavItem({ to, icon, children, end }: { to: string; icon: ReactNode; children: ReactNode; end?: boolean }) {
   return (
@@ -80,13 +86,15 @@ function TeamGroup({ team, projects }: { team: Pick<Team, 'id' | 'name'>; projec
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ onSearch }: { onSearch: () => void }) {
   const user = useCurrentUser();
   const { logout } = useAuth();
   const teams = useTeams();
   const projects = useProjects();
   const notifications = useNotifications();
   const unread = notifications.data?.unreadCount ?? 0;
+  const [newProject, setNewProject] = useState(false);
+  const [profile, setProfile] = useState(false);
 
   const groups = useMemo(() => {
     const byTeam = new Map<string, Project[]>();
@@ -104,6 +112,18 @@ export function Sidebar() {
       <div className="flex items-center gap-2 px-4 py-4">
         <Logo className="h-6 w-6" />
         <span className="font-semibold text-white">Asana Clone</span>
+      </div>
+
+      <div className="px-2 pb-3">
+        <button
+          type="button"
+          onClick={onSearch}
+          className="flex w-full items-center gap-2 rounded-md bg-white/10 px-3 py-1.5 text-sm text-gray-300 hover:bg-white/15"
+        >
+          <SearchIcon className="h-4 w-4" />
+          <span className="flex-1 text-left">Search</span>
+          <kbd className="rounded border border-white/20 px-1 text-[10px] text-gray-400">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+        </button>
       </div>
 
       <div className="space-y-0.5 px-2">
@@ -134,11 +154,20 @@ export function Sidebar() {
       </div>
 
       <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-2">
-        <div className="mb-1 flex items-center justify-between px-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          <span>Teams</span>
+        <div className="mb-1 flex items-center gap-2 px-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <span className="flex-1">Teams</span>
           <Link to="/teams" className="normal-case tracking-normal hover:text-white">
             Browse
           </Link>
+          <button
+            type="button"
+            aria-label="New project"
+            title="New project"
+            className="rounded p-0.5 hover:bg-sidebar-hover hover:text-white"
+            onClick={() => setNewProject(true)}
+          >
+            <PlusIcon className="h-3.5 w-3.5" />
+          </button>
         </div>
         <div className="space-y-1">
           {groups.map((g) => (
@@ -148,11 +177,18 @@ export function Sidebar() {
       </div>
 
       <div className="flex items-center gap-2 border-t border-white/10 px-3 py-3">
-        <Avatar user={user} size="md" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-sm text-white">{user.name}</div>
-          <div className="truncate text-xs text-gray-400">{user.email}</div>
-        </div>
+        <button
+          type="button"
+          aria-label="My profile"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 text-left hover:bg-sidebar-hover"
+          onClick={() => setProfile(true)}
+        >
+          <Avatar user={user} size="md" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-white">{user.name}</span>
+            <span className="block truncate text-xs text-gray-400">{user.email}</span>
+          </span>
+        </button>
         <button
           className="rounded p-1.5 text-gray-400 hover:bg-sidebar-hover hover:text-white"
           onClick={() => void logout()}
@@ -162,6 +198,8 @@ export function Sidebar() {
           <LogoutIcon />
         </button>
       </div>
+      {newProject && <NewProjectDialog open onClose={() => setNewProject(false)} />}
+      {profile && <ProfileDialog onClose={() => setProfile(false)} />}
     </nav>
   );
 }

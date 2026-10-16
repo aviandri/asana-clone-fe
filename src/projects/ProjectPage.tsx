@@ -6,7 +6,7 @@ import { useProject, useProjectTasks } from '@/api/hooks';
 import type { ProjectDetail, ProjectView, Task } from '@/api/types';
 import { useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
-import { BoardIcon, CalendarIcon, ListIcon, PlusIcon } from '@/components/icons';
+import { BoardIcon, CalendarIcon, ListIcon, PlusIcon, SettingsIcon } from '@/components/icons';
 import { EmptyState, ErrorState } from '@/components/PageHeader';
 import { FullPageSpinner } from '@/components/Spinner';
 import { canEditProjectContent } from '@/lib/permissions';
@@ -14,6 +14,7 @@ import type { CompletionFilter } from '@/lib/taskFilters';
 import { BoardView } from './BoardView';
 import { CalendarView } from './CalendarView';
 import { ListView } from './ListView';
+import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 
 const VIEWS: { key: Lowercase<ProjectView>; label: string; icon: ReactNode }[] = [
   { key: 'list', label: 'List', icon: <ListIcon className="h-3.5 w-3.5" /> },
@@ -31,8 +32,10 @@ export type ProjectViewProps = {
 };
 
 function ProjectHeader({ project }: { project: ProjectDetail }) {
+  const [settings, setSettings] = useState<null | 'general' | 'members'>(null);
   return (
     <header className="border-b border-gray-200 px-6 pt-4">
+      {settings && <ProjectSettingsDialog project={project} open initialTab={settings} onClose={() => setSettings(null)} />}
       <div className="flex items-center gap-3">
         <span
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-semibold text-white"
@@ -45,7 +48,12 @@ function ProjectHeader({ project }: { project: ProjectDetail }) {
           <p className="truncate text-xs text-gray-500">{project.team.name}</p>
           <h1 className="truncate text-xl font-semibold text-gray-900">{project.name}</h1>
         </div>
-        <div className="hidden -space-x-1.5 sm:flex" aria-label="Project members">
+        <button
+          type="button"
+          className="hidden -space-x-1.5 rounded-full sm:flex"
+          aria-label={`Project members (${project.members.length})`}
+          onClick={() => setSettings('members')}
+        >
           {project.members.slice(0, 5).map((m) => (
             <Avatar key={m.user.id} user={m.user} size="sm" className="ring-2 ring-white" />
           ))}
@@ -54,8 +62,19 @@ function ProjectHeader({ project }: { project: ProjectDetail }) {
               +{project.members.length - 5}
             </span>
           )}
-        </div>
+        </button>
+        <button type="button" aria-label="Project settings" title="Project settings" className="btn-ghost p-1.5" onClick={() => setSettings('general')}>
+          <SettingsIcon />
+        </button>
       </div>
+      {project.archived && (
+        <p role="status" className="mt-3 rounded-md bg-amber-50 px-3 py-1.5 text-sm text-amber-800">
+          This project is archived.{' '}
+          <button type="button" className="underline" onClick={() => setSettings('general')}>
+            Manage
+          </button>
+        </p>
+      )}
       <nav aria-label="Project views" className="mt-3 flex gap-4">
         {VIEWS.map((v) => (
           <NavLink

@@ -6,9 +6,9 @@ import { showToast } from './toast';
 export function createQueryClient() {
   return new QueryClient({
     mutationCache: new MutationCache({
-      onError: (err, variables) => {
-        // Callers that render the error inline pass `quiet: true` in the variables.
-        if ((variables as { quiet?: boolean } | undefined)?.quiet) return;
+      onError: (err, variables, _ctx, mutation) => {
+        // Errors rendered inline opt out via `meta: { quiet: true }` or `quiet: true` in the variables.
+        if (mutation.meta?.quiet || (variables as { quiet?: boolean } | undefined)?.quiet) return;
         if (err instanceof ApiError && err.status === 401) return; // handled by auth
         showToast(errorMessage(err));
       },

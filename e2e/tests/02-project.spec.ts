@@ -4,10 +4,12 @@ test('creates a project from the UI', async ({ authedPage: page, api }) => {
   const name = uniq('E2E project');
   await page.goto('/');
 
-  await page.getByRole('button', { name: /new project/i }).first().click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByLabel(/name/i).fill(name);
-  await dialog.getByRole('button', { name: /create/i }).click();
+  // Sidebar "+" next to Teams (Home may show its own New project button too).
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'New project' }).click();
+  const dialog = page.getByRole('dialog', { name: 'New project' });
+  await dialog.getByLabel('Project name').fill(name);
+  // Team defaults to the first team in the list.
+  await dialog.getByRole('button', { name: 'Create project' }).click();
 
   await expect(page).toHaveURL(/\/projects\/[0-9a-f-]{36}/);
   await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();

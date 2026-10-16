@@ -16,8 +16,9 @@ test('opens a task from the list and comments on it', async ({ authedPage: page,
   await expect(panel).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`[?&]task=${task.id}`));
 
-  await panel.getByRole('textbox', { name: /comment/i }).fill(body);
-  await panel.getByRole('button', { name: /^comment$/i }).click();
+  // The Comment button appears once the box is focused (fill focuses it).
+  await panel.getByRole('textbox', { name: 'Add a comment' }).fill(body);
+  await panel.getByRole('button', { name: 'Comment', exact: true }).click();
 
   await expect(panel.getByText(body)).toBeVisible();
   await expect

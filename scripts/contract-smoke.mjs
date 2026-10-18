@@ -579,7 +579,7 @@ function parseCsv(text) {
 }
 
 // =====================================================================================
-// v1.2 §12 Workspaces (owned by platform/QA). Covers the agreed clarifications W1–W4 and W7; W5
+// v1.2 §12 Workspaces (owned by platform/QA). Covers the agreed clarifications W1–W4, W7 and W8; W5
 // (organization conversion needs a second free domain) and W6 are covered by BE tests. Needs the full seed (SPEC §12):
 // "Mekari" (organization, domain example.com; admin, alice, bob) and "Acme Pilot" (alice ADMIN,
 // bob MEMBER, GUEST_EMAIL a GUEST on project "Pilot Rollout" only). bob creates a "[fe-smoke]"
@@ -751,8 +751,16 @@ async function contractV12Workspaces({ aliceUser, bobUser }) {
     expect('guest POST /goals → 403', await guest('POST', '/goals', { title: `${PREFIX} guest goal`, timePeriod: period }), 403, ErrorBody);
     const pilotDetail = (await alice('GET', `/projects/${pilot?.id}`)).body;
     const shared = new Set(pilotDetail?.members?.map((m) => m.user.id));
-    const gUsers = expect('guest GET /users', await guest('GET', '/users'), 200, List(UserSummary));
+    const UserItem = { ...UserSummary, role: Role }; // W8: /users items carry the current-workspace role
+    const gUsers = expect('guest GET /users (W8 shape)', await guest('GET', '/users'), 200, List(UserItem));
     truthy('guest /users lists only people sharing a project', gUsers?.data?.length > 0 && gUsers.data.every((u) => shared.has(u.id)), `users=${gUsers?.data?.map((u) => u.email).join(',')}`);
+    // W8: roles are per workspace, so the same people read differently in Acme and Mekari.
+    const roleOf = (body, emails) => emails.map((e) => body?.data?.find((u) => u.email === e)?.role ?? null);
+    const acmeUsers = expect('W8 GET /users in Acme Pilot', await alice('GET', '/users', undefined, ws(acme.id)), 200, List(UserItem));
+    same('W8 Acme roles: guest GUEST, alice ADMIN, bob MEMBER', roleOf(acmeUsers, [GUEST_EMAIL, ALICE_EMAIL, BOB_EMAIL]), ['GUEST', 'ADMIN', 'MEMBER']);
+    const mekariUsers = expect('W8 GET /users in Mekari', await alice('GET', '/users', undefined, ws(mekari.id)), 200, List(UserItem));
+    same('W8 Mekari roles: admin ADMIN, alice and bob MEMBER', roleOf(mekariUsers, [ADMIN_EMAIL, ALICE_EMAIL, BOB_EMAIL]), ['ADMIN', 'MEMBER', 'MEMBER']);
+    same("W8 a guest sees the same roles as Acme's admin does", gUsers?.data?.map((u) => [u.id, u.role]).sort(), gUsers?.data?.map((u) => [u.id, acmeUsers?.data?.find((a) => a.id === u.id)?.role ?? null]).sort());
     // W7: guests only find people who share a project with them by id.
     const coMember = [...shared].find((id) => id !== gme?.id);
     expect('W7 guest GET /users/:id of a co-member → 200', await guest('GET', `/users/${coMember}`), 200, UserSummary);

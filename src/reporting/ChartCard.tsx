@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { useId, useState, type ReactNode } from 'react';
+import { useCountUp } from '@/motion/useCountUp';
 
 export type TableSpec = { columns: string[]; rows: (string | number)[][] };
 
@@ -100,11 +101,20 @@ export function ChartCard({
 }
 
 /** Stat tile (e2e: role=group named exactly by its label, containing the number). */
+function CountUp({ value }: { value: number }) {
+  // Counts up only when the value changes (first render shows the final number; reduced motion
+  // jumps straight to it), so the tile's text is always exactly one number at rest.
+  const shown = useCountUp(value);
+  return <span>{Math.round(shown).toLocaleString()}</span>;
+}
+
 export function KpiTile({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'bad' }) {
   return (
     <div role="group" aria-label={label} className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className={clsx('mt-1 text-2xl font-semibold', tone === 'bad' ? 'text-red-700' : 'text-gray-900')}>{value}</div>
+      <div className={clsx('mt-1 text-2xl font-semibold', tone === 'bad' ? 'text-red-700' : 'text-gray-900')}>
+        {typeof value === 'number' ? <CountUp value={value} /> : value}
+      </div>
       {hint && <div className="mt-0.5 text-xs text-gray-500">{hint}</div>}
     </div>
   );

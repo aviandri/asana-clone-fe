@@ -7,7 +7,7 @@ import { qk } from '@/api/queryKeys';
 import type { Goal } from '@/api/types';
 import { useCurrentUser } from '@/auth/useAuth';
 import { EmptyState, ErrorState, PageHeader } from '@/components/PageHeader';
-import { FullPageSpinner } from '@/components/Spinner';
+import { ListSkeleton } from '@/components/Skeleton';
 import { PlusIcon, TargetIcon } from '@/components/icons';
 import { buildGoalTree } from '@/lib/goals';
 import { currentQuarter, defaultPeriods, periodLabel, sortPeriods } from '@/lib/periods';
@@ -108,12 +108,12 @@ export function GoalsPage() {
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {goals.isLoading ? (
-          <FullPageSpinner />
+          <ListSkeleton label="Loading goals" rows={6} />
         ) : goals.isError ? (
           <ErrorState error={goals.error} />
         ) : roots.length === 0 ? (
-          <EmptyState title={`No goals for ${periodLabel(period)}`}>
-            {filter === 'all' ? 'Create a goal to get started — align it to a parent to build the cascade.' : 'Nothing matches this filter.'}
+          <EmptyState illustration="goals" title={`No goals for ${periodLabel(period)}`}>
+            {filter === 'all' ? 'Set a goal to rally the team — align it to a parent and progress flows up the cascade.' : 'Nothing matches this filter. Try “All”.'}
           </EmptyState>
         ) : (
           <div className="pb-16">

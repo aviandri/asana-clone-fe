@@ -30,6 +30,21 @@ export default {
         sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
       },
       ringColor: { DEFAULT: v('primary-500') },
+      // Motion (see src/motion/tokens.ts): ease-out to enter, 120–220ms, transform/opacity only.
+      keyframes: {
+        'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+        'rise-in': { from: { opacity: '0', transform: 'translateY(4px)' }, to: { opacity: '1', transform: 'none' } },
+        pop: { '0%': { transform: 'scale(1)' }, '40%': { transform: 'scale(1.25)' }, '100%': { transform: 'scale(1)' } },
+        'check-draw': { from: { strokeDashoffset: '1' }, to: { strokeDashoffset: '0' } },
+        settle: { '0%': { transform: 'translateY(-2px)', opacity: '0.7' }, '100%': { transform: 'none', opacity: '1' } },
+      },
+      animation: {
+        'fade-in': 'fade-in 120ms cubic-bezier(0.16,1,0.3,1) both',
+        'rise-in': 'rise-in 180ms cubic-bezier(0.16,1,0.3,1) both',
+        pop: 'pop 220ms cubic-bezier(0.16,1,0.3,1)',
+        'check-draw': 'check-draw 220ms cubic-bezier(0.16,1,0.3,1) both',
+        settle: 'settle 220ms cubic-bezier(0.16,1,0.3,1)',
+      },
     },
   },
   plugins: [],

@@ -1,8 +1,8 @@
-import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
+import { DndContext, DragOverlay, useDroppable, type DropAnimation } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import clsx from 'clsx';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
 import type { Task } from '@/api/types';
 import { Avatar } from '@/components/Avatar';
 import { CommentIcon, PlusIcon, SubtaskIcon } from '@/components/icons';
@@ -12,11 +12,16 @@ import { filterByCompletion } from '@/lib/taskFilters';
 import { CompleteToggle, PriorityBadge } from '@/tasks/fields';
 import { useCreateTask, useUpdateTask } from '@/tasks/useTaskMutations';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
+import { originOf, useToggleComplete } from '@/tasks/useToggleComplete';
+import { usePrefersReducedMotion } from '@/motion/reducedMotion';
 import type { ProjectViewProps } from './ProjectPage';
 import { NO_SECTION, useSectionDnd } from './useSectionDnd';
 import { useSectionMutations } from './useSectionMutations';
 
-function CardBody({ task, canEdit, onToggle }: { task: Task; canEdit: boolean; onToggle?: () => void }) {
+// Drop settles with a slight spring overshoot (transform-only, 220ms).
+const DROP_SPRING: DropAnimation = { duration: 220, easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)' };
+
+function CardBody({ task, canEdit, onToggle }: { task: Task; canEdit: boolean; onToggle?: (e: MouseEvent<HTMLButtonElement>) => void }) {
   return (
     <>
       <div className="flex items-start gap-2">
@@ -25,7 +30,7 @@ function CardBody({ task, canEdit, onToggle }: { task: Task; canEdit: boolean; o
             size="sm"
             completed={task.completed}
             label={task.completed ? `Mark "${task.title}" incomplete` : `Mark "${task.title}" complete`}
-            onToggle={() => canEdit && onToggle?.()}
+            onToggle={(e) => canEdit && onToggle?.(e)}
           />
         </span>
         <span className={clsx('min-w-0 flex-1 break-words text-sm', task.completed && 'text-gray-500 line-through')}>
@@ -54,9 +59,9 @@ function CardBody({ task, canEdit, onToggle }: { task: Task; canEdit: boolean; o
   );
 }
 
-function BoardCard({ task, canEdit }: { task: Task; canEdit: boolean }) {
+function BoardCard({ task, canEdit, lastOpenInColumn }: { task: Task; canEdit: boolean; lastOpenInColumn: boolean }) {
   const panel = useTaskPanel();
-  const update = useUpdateTask();
+  const toggleComplete = useToggleComplete();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     disabled: !canEdit,
@@ -83,7 +88,7 @@ function BoardCard({ task, canEdit }: { task: Task; canEdit: boolean }) {
         isDragging && 'opacity-40',
       )}
     >
-      <CardBody task={task} canEdit={canEdit} onToggle={() => update.mutate({ id: task.id, patch: { completed: !task.completed } })} />
+      <CardBody task={task} canEdit={canEdit} onToggle={(e) => toggleComplete(task, { lastOpenInSection: lastOpenInColumn, origin: originOf(e.currentTarget) })} />
     </li>
   );
 }
@@ -141,10 +146,11 @@ function Column({
   onAdd: (title: string) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
+  const openCount = ids.filter((tid) => byId.get(tid) && !byId.get(tid)!.completed).length;
   return (
     <section
       aria-label={name}
-      className={clsx('flex max-h-full w-72 shrink-0 flex-col rounded-xl bg-gray-100/70', isOver && 'ring-2 ring-primary-300')}
+      className={clsx('flex max-h-full w-72 shrink-0 flex-col rounded-xl transition-colors duration-150', isOver ? 'bg-primary-50 ring-2 ring-primary-300' : 'bg-gray-100/70')}
     >
       <header className="flex items-center gap-2 px-3 py-2.5">
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>
@@ -165,7 +171,7 @@ function Column({
           <ul className="space-y-2" aria-label={`${name} tasks`}>
             {ids.map((tid) => {
               const t = byId.get(tid);
-              return t ? <BoardCard key={tid} task={t} canEdit={canEdit} /> : null;
+              return t ? <BoardCard key={tid} task={t} canEdit={canEdit} lastOpenInColumn={!t.completed && openCount === 1} /> : null;
             })}
           </ul>
         </SortableContext>
@@ -190,6 +196,7 @@ function Column({
 
 export function BoardView({ project, tasks, canEdit, filter, addingTo, setAddingTo }: ProjectViewProps) {
   const update = useUpdateTask();
+  const reducedMotion = usePrefersReducedMotion();
   const create = useCreateTask();
   const sections = useSectionMutations(project.id);
   const [newSection, setNewSection] = useState(false);
@@ -237,9 +244,9 @@ export function BoardView({ project, tasks, canEdit, filter, addingTo, setAdding
             }
           />
         ))}
-        <DragOverlay>
+        <DragOverlay dropAnimation={reducedMotion ? null : DROP_SPRING}>
           {dnd.activeTask && (
-            <div className="w-72 rotate-2 cursor-grabbing rounded-lg border border-gray-300 bg-white p-3 shadow-lg">
+            <div className="w-72 scale-[1.02] cursor-grabbing rounded-lg border border-primary-200 bg-white p-3 shadow-xl ring-1 ring-primary-100">
               <CardBody task={dnd.activeTask} canEdit={false} />
             </div>
           )}

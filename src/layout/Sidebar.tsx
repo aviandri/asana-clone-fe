@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { useNotifications, useProjects, useTeams } from '@/api/hooks';
 import type { Project, Team } from '@/api/types';
@@ -83,13 +83,39 @@ function TeamGroup({ team, projects }: { team: Pick<Team, 'id' | 'name'>; projec
   );
 }
 
+/**
+ * Inbox count; pops when new items arrive after the first load (not on load, not when the count
+ * drops). The class is removed on animationend, so the element is never remounted.
+ */
+function UnreadBadge({ count }: { count: number | undefined }) {
+  const prev = useRef<number | undefined>(count);
+  const [popping, setPopping] = useState(false);
+  useEffect(() => {
+    if (prev.current !== undefined && count !== undefined && count > prev.current) setPopping(true);
+    prev.current = count;
+  }, [count]);
+  if (!count) return null;
+  return (
+    <span
+      onAnimationEnd={() => setPopping(false)}
+      className={clsx(
+        'ml-2 inline-block min-w-[1.25rem] rounded-full bg-badge px-1.5 text-center text-[11px] font-semibold leading-5 text-white',
+        popping && 'animate-pop motion-reduce:animate-none',
+      )}
+      aria-label={`${count} unread`}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
 export function Sidebar() {
   const user = useCurrentUser();
   const { logout } = useAuth();
   const teams = useTeams();
   const projects = useProjects();
   const notifications = useNotifications();
-  const unread = notifications.data?.unreadCount ?? 0;
+  const unread = notifications.data?.unreadCount;
   const [newProject, setNewProject] = useState(false);
   const [profile, setProfile] = useState(false);
 
@@ -120,14 +146,7 @@ export function Sidebar() {
         <NavItem to="/inbox" icon={<BellIcon />}>
           <span className="flex items-center justify-between">
             Inbox
-            {unread > 0 && (
-              <span
-                className="ml-2 min-w-[1.25rem] rounded-full bg-badge px-1.5 text-center text-[11px] font-semibold leading-5 text-white"
-                aria-label={`${unread} unread`}
-              >
-                {unread > 99 ? '99+' : unread}
-              </span>
-            )}
+            <UnreadBadge count={unread} />
           </span>
         </NavItem>
         <NavItem to="/goals" icon={<TargetIcon />}>

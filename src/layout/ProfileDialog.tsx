@@ -6,7 +6,29 @@ import { useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
 import { ColorPicker } from '@/components/ColorPicker';
 import { Modal } from '@/components/Modal';
+import { setCelebrationsEnabled, useCelebrationsEnabled } from '@/lib/celebrations';
 import { errorMessage } from '@/lib/errors';
+
+/** Saved immediately (per device, localStorage) — independent of the profile Save button. */
+function CelebrationsToggle() {
+  const on = useCelebrationsEnabled();
+  return (
+    <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-3">
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary-500 focus:ring-primary-500"
+        checked={on}
+        onChange={(e) => setCelebrationsEnabled(e.target.checked)}
+      />
+      <span>
+        <span className="block text-sm font-medium text-gray-900">Celebrations</span>
+        <span className="block text-xs text-gray-500">
+          A quick burst of petals when you clear a section or hit a goal. Always off when your system asks for reduced motion.
+        </span>
+      </span>
+    </label>
+  );
+}
 
 export function ProfileDialog({ onClose }: { onClose: () => void }) {
   const me = useCurrentUser();
@@ -53,6 +75,7 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
           <legend className="label">Avatar color</legend>
           <ColorPicker value={color} onChange={setColor} />
         </fieldset>
+        <CelebrationsToggle />
         <fieldset className="space-y-2 rounded-lg border border-gray-200 p-3">
           <legend className="px-1 text-sm font-medium text-gray-700">Change password</legend>
           <input aria-label="Current password" type="password" autoComplete="current-password" placeholder="Current password" className="input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />

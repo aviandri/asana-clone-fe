@@ -96,7 +96,7 @@ export function GoalTree({ roots }: { roots: GoalNode[] }) {
         aria-selected={activeId === g.id}
         tabIndex={activeId === g.id ? 0 : -1}
         onFocus={(e) => e.target === e.currentTarget && setFocusId(g.id)}
-        className="outline-none [&:focus-visible>div]:ring-2 [&:focus-visible>div]:ring-blue-500"
+        className="outline-none [&:focus-visible>div]:ring-2 [&:focus-visible>div]:ring-primary-500"
       >
         <div
           className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-gray-100 py-2 pr-3 hover:bg-gray-50 md:grid-cols-[minmax(0,1fr)_7rem_10rem_6.5rem]"

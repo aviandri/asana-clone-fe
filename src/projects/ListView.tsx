@@ -37,7 +37,7 @@ export function TaskRow({ task, canEdit }: { task: Task; canEdit: boolean }) {
       className={clsx(
         GRID,
         'group cursor-pointer border-b border-gray-100 text-sm hover:bg-gray-50',
-        selected && 'bg-blue-50 hover:bg-blue-50',
+        selected && 'bg-primary-50 hover:bg-primary-50',
         isDragging && 'opacity-40',
       )}
     >
@@ -50,7 +50,7 @@ export function TaskRow({ task, canEdit }: { task: Task; canEdit: boolean }) {
             {...listeners}
             aria-label={`Move ${task.title}`}
             onClick={(e) => e.stopPropagation()}
-            className="absolute left-1 cursor-grab rounded p-0.5 text-gray-400 opacity-0 hover:bg-gray-200 focus:opacity-100 group-hover:opacity-100"
+            className="absolute left-1 cursor-grab rounded p-0.5 text-gray-500 opacity-0 hover:bg-gray-200 focus:opacity-100 group-hover:opacity-100"
           >
             <GripIcon className="h-3.5 w-3.5" />
           </button>
@@ -160,7 +160,7 @@ export function QuickAddRow({
         autoFocus
         aria-label="New task name"
         placeholder={placeholder}
-        className="min-w-0 flex-1 rounded border border-blue-500 px-1 py-0.5 text-sm focus:outline-none"
+        className="min-w-0 flex-1 rounded border border-primary-500 px-1 py-0.5 text-sm focus:outline-none"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         onBlur={() => {
@@ -191,7 +191,7 @@ function SectionMenu({ onRename, onDelete }: { onRename: () => void; onDelete: (
       <button
         type="button"
         aria-label="Section actions"
-        className="rounded p-1 text-gray-400 opacity-0 hover:bg-gray-100 hover:text-gray-700 focus:opacity-100 group-hover/section:opacity-100"
+        className="rounded p-1 text-gray-500 opacity-0 hover:bg-gray-100 hover:text-gray-700 focus:opacity-100 group-hover/section:opacity-100"
         onClick={() => setOpen((o) => !o)}
       >
         <DotsIcon />
@@ -267,12 +267,12 @@ function SectionBlock({
           </h2>
         )}
         {renaming && <span className="sr-only" id={headingId}>{name}</span>}
-        <span className="text-xs text-gray-400">{tasks.length}</span>
+        <span className="text-xs text-gray-500">{tasks.length}</span>
         {canEdit && (
           <button
             type="button"
             aria-label={`Add a task to ${name}`}
-            className="rounded p-1 text-gray-400 opacity-0 hover:bg-gray-100 hover:text-gray-700 focus:opacity-100 group-hover/section:opacity-100"
+            className="rounded p-1 text-gray-500 opacity-0 hover:bg-gray-100 hover:text-gray-700 focus:opacity-100 group-hover/section:opacity-100"
             onClick={() => {
               setCollapsed(false);
               setAdding(true);
@@ -412,7 +412,7 @@ export function ListView({
         <DragOverlay>
           {dnd.activeTask && (
             <div className="flex items-center gap-2 rounded border border-gray-200 bg-white py-1.5 pl-6 pr-3 text-sm shadow-lg">
-              <GripIcon className="h-3.5 w-3.5 text-gray-400" />
+              <GripIcon className="h-3.5 w-3.5 text-gray-500" />
               {dnd.activeTask.title}
             </div>
           )}
@@ -426,7 +426,7 @@ export function ListView({
               autoFocus
               aria-label="New section name"
               placeholder="Section name"
-              className="rounded border border-blue-500 px-1 py-0.5 text-base font-semibold focus:outline-none"
+              className="rounded border border-primary-500 px-1 py-0.5 text-base font-semibold focus:outline-none"
               onBlur={(e) => {
                 const name = e.currentTarget.value.trim();
                 if (name) sections.create.mutate({ name, position: positionAtEnd(project.sections) });

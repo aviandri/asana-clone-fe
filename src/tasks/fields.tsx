@@ -46,7 +46,7 @@ export function CompleteToggle({
 }
 
 const PRIORITY_STYLE: Record<Priority, string> = {
-  NONE: 'bg-transparent text-gray-400',
+  NONE: 'bg-transparent text-gray-500',
   LOW: 'bg-teal-100 text-teal-800',
   MEDIUM: 'bg-amber-100 text-amber-800',
   HIGH: 'bg-purple-100 text-purple-800',
@@ -82,7 +82,7 @@ export function PrioritySelect({
       onChange={(e) => onChange(e.target.value as Priority)}
       onClick={(e) => e.stopPropagation()}
       className={clsx(
-        'cursor-pointer appearance-none rounded-full border-0 px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default',
+        'cursor-pointer appearance-none rounded-full border-0 px-2 py-0.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:cursor-default',
         PRIORITY_STYLE[value],
         value === 'NONE' && 'hover:bg-gray-100',
         className,
@@ -120,7 +120,7 @@ export function DueDateField({
         aria-label={label}
         autoFocus
         defaultValue={value ?? ''}
-        className="w-36 rounded border border-gray-300 px-1.5 py-0.5 text-xs focus:border-blue-500 focus:outline-none"
+        className="w-36 rounded border border-gray-300 px-1.5 py-0.5 text-xs focus:border-primary-500 focus:outline-none"
         onClick={(e) => e.stopPropagation()}
         onBlur={() => setEditing(false)}
         onKeyDown={(e) => {
@@ -145,7 +145,7 @@ export function DueDateField({
         }}
         className={clsx(
           'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs hover:bg-gray-100 disabled:hover:bg-transparent',
-          value ? dueTone(value, completed) : 'text-gray-400',
+          value ? dueTone(value, completed) : 'text-gray-500',
           variant === 'field' && 'text-sm',
         )}
       >
@@ -162,7 +162,7 @@ export function DueDateField({
         <button
           type="button"
           aria-label={`Clear ${label.toLowerCase()}`}
-          className="rounded p-0.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+          className="rounded p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
           onClick={() => onChange(null)}
         >
           <XIcon className="h-3 w-3" />
@@ -222,12 +222,12 @@ export function UserPickerList({
           <li key={u.id} role="option" aria-selected={u.id === selectedId}>
             <button
               type="button"
-              className={clsx('flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-gray-100', u.id === selectedId && 'bg-blue-50')}
+              className={clsx('flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-gray-100', u.id === selectedId && 'bg-primary-50')}
               onClick={() => onPick(u)}
             >
               <Avatar user={u} size="sm" />
               <span className="min-w-0 flex-1 truncate">{u.name}</span>
-              <span className="truncate text-xs text-gray-400">{u.email}</span>
+              <span className="truncate text-xs text-gray-500">{u.email}</span>
             </button>
           </li>
         ))}

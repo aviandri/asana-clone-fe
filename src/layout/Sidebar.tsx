@@ -5,7 +5,7 @@ import { useNotifications, useProjects, useTeams } from '@/api/hooks';
 import type { Project, Team } from '@/api/types';
 import { useAuth, useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
-import { Logo } from '@/components/Logo';
+import { MekariLockup } from '@/components/brand/Brand';
 import { NewProjectDialog } from '@/projects/NewProjectDialog';
 import { ProfileDialog } from './ProfileDialog';
 import {
@@ -17,27 +17,30 @@ import {
   HomeIcon,
   LogoutIcon,
   PlusIcon,
-  SearchIcon,
   ShieldIcon,
   TargetIcon,
 } from '@/components/icons';
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+// Dark, Slack-like shell. Colours are sidebar tokens (index.css); every pairing is ≥ 4.5:1 for
+// text. The active item is also marked by a left accent bar so state isn't conveyed by colour alone.
+const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring';
+const itemBase = clsx(
+  'relative flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors duration-150',
+  "before:absolute before:-left-2 before:top-1.5 before:bottom-1.5 before:w-1 before:rounded-r before:bg-white before:opacity-0 before:transition-opacity before:content-['']",
+  focusRing,
+);
+const itemState = (active: boolean) =>
+  active ? 'bg-sidebar-active font-medium text-white before:opacity-100' : 'text-sidebar-text hover:bg-sidebar-hover hover:text-white';
 
 function NavItem({ to, icon, children, end }: { to: string; icon: ReactNode; children: ReactNode; end?: boolean }) {
   return (
-    <NavLink
-      to={to}
-      end={end}
-      className={({ isActive }) =>
-        clsx(
-          'flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors',
-          isActive ? 'bg-sidebar-active text-white' : 'text-sidebar-text hover:bg-sidebar-hover',
-        )
-      }
-    >
-      <span className="text-gray-400">{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{children}</span>
+    <NavLink to={to} end={end} className={({ isActive }) => clsx(itemBase, itemState(isActive))}>
+      {({ isActive }) => (
+        <>
+          <span className={clsx('shrink-0', isActive ? 'text-white' : 'text-sidebar-muted')}>{icon}</span>
+          <span className="min-w-0 flex-1 truncate">{children}</span>
+        </>
+      )}
     </NavLink>
   );
 }
@@ -48,16 +51,16 @@ function TeamGroup({ team, projects }: { team: Pick<Team, 'id' | 'name'>; projec
     <div>
       <div className="group flex items-center rounded-md pr-1 text-sm text-sidebar-text hover:bg-sidebar-hover">
         <button
-          className="flex min-w-0 flex-1 items-center gap-1 px-2 py-1.5 text-left"
+          className={clsx('flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1.5 text-left', focusRing)}
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
         >
-          {open ? <ChevronDownIcon className="h-3.5 w-3.5" /> : <ChevronRightIcon className="h-3.5 w-3.5" />}
+          {open ? <ChevronDownIcon className="h-3.5 w-3.5 text-sidebar-muted" /> : <ChevronRightIcon className="h-3.5 w-3.5 text-sidebar-muted" />}
           <span className="truncate font-medium">{team.name}</span>
         </button>
         <Link
           to={`/teams/${team.id}`}
-          className="rounded px-1.5 text-xs text-gray-400 opacity-0 hover:text-white focus:opacity-100 group-hover:opacity-100"
+          className={clsx('rounded px-1.5 text-xs text-sidebar-muted opacity-0 hover:text-white focus:opacity-100 group-hover:opacity-100', focusRing)}
           aria-label={`Open team ${team.name}`}
         >
           ⋯
@@ -65,19 +68,11 @@ function TeamGroup({ team, projects }: { team: Pick<Team, 'id' | 'name'>; projec
       </div>
       {open && (
         <ul className="ml-3 space-y-0.5">
-          {projects.length === 0 && <li className="px-3 py-1 text-xs text-gray-500">No projects yet</li>}
+          {projects.length === 0 && <li className="px-3 py-1 text-xs text-sidebar-muted">No projects yet</li>}
           {projects.map((p) => (
             <li key={p.id}>
-              <NavLink
-                to={`/projects/${p.id}`}
-                className={({ isActive }) =>
-                  clsx(
-                    'flex items-center gap-2 rounded-md px-3 py-1 text-sm',
-                    isActive ? 'bg-sidebar-active text-white' : 'text-sidebar-text hover:bg-sidebar-hover',
-                  )
-                }
-              >
-                <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: p.color }} />
+              <NavLink to={`/projects/${p.id}`} className={({ isActive }) => clsx(itemBase, 'gap-2 py-1', itemState(isActive))}>
+                <span className="h-2.5 w-2.5 shrink-0 rounded-sm ring-1 ring-white/20" style={{ backgroundColor: p.color }} />
                 <span className="truncate">{p.name}</span>
               </NavLink>
             </li>
@@ -88,7 +83,7 @@ function TeamGroup({ team, projects }: { team: Pick<Team, 'id' | 'name'>; projec
   );
 }
 
-export function Sidebar({ onSearch }: { onSearch: () => void }) {
+export function Sidebar() {
   const user = useCurrentUser();
   const { logout } = useAuth();
   const teams = useTeams();
@@ -111,22 +106,9 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
 
   return (
     <nav aria-label="Main" className="flex h-full flex-col bg-sidebar text-sidebar-text">
-      <div className="flex items-center gap-2 px-4 py-4">
-        <Logo className="h-6 w-6" />
-        <span className="font-semibold text-white">Asana Clone</span>
-      </div>
-
-      <div className="px-2 pb-3">
-        <button
-          type="button"
-          onClick={onSearch}
-          className="flex w-full items-center gap-2 rounded-md bg-white/10 px-3 py-1.5 text-sm text-gray-300 hover:bg-white/15"
-        >
-          <SearchIcon className="h-4 w-4" />
-          <span className="flex-1 text-left">Search</span>
-          <kbd className="rounded border border-white/20 px-1 text-[10px] text-gray-400">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
-        </button>
-      </div>
+      <Link to="/" className={clsx('mx-2 mb-2 mt-3 flex h-10 items-center rounded-md px-2', focusRing)} aria-label="Mekari Project home">
+        <MekariLockup variant="dark" />
+      </Link>
 
       <div className="space-y-0.5 px-2">
         <NavItem to="/" end icon={<HomeIcon />}>
@@ -140,7 +122,7 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
             Inbox
             {unread > 0 && (
               <span
-                className="ml-2 rounded-full bg-brand-500 px-1.5 text-[11px] font-semibold text-white"
+                className="ml-2 min-w-[1.25rem] rounded-full bg-badge px-1.5 text-center text-[11px] font-semibold leading-5 text-white"
                 aria-label={`${unread} unread`}
               >
                 {unread > 99 ? '99+' : unread}
@@ -161,17 +143,17 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
         )}
       </div>
 
-      <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-2">
-        <div className="mb-1 flex items-center gap-2 px-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+      <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        <div className="mb-1 flex items-center gap-2 px-3 text-xs font-semibold uppercase tracking-wide text-sidebar-muted">
           <span className="flex-1">Teams</span>
-          <Link to="/teams" className="normal-case tracking-normal hover:text-white">
+          <Link to="/teams" className={clsx('rounded normal-case tracking-normal hover:text-white', focusRing)}>
             Browse
           </Link>
           <button
             type="button"
             aria-label="New project"
             title="New project"
-            className="rounded p-0.5 hover:bg-sidebar-hover hover:text-white"
+            className={clsx('rounded p-0.5 hover:bg-sidebar-hover hover:text-white', focusRing)}
             onClick={() => setNewProject(true)}
           >
             <PlusIcon className="h-3.5 w-3.5" />
@@ -188,17 +170,17 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
         <button
           type="button"
           aria-label="My profile"
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 text-left hover:bg-sidebar-hover"
+          className={clsx('flex min-w-0 flex-1 items-center gap-2 rounded-md p-1 text-left hover:bg-sidebar-hover', focusRing)}
           onClick={() => setProfile(true)}
         >
-          <Avatar user={user} size="md" />
+          <Avatar user={user} size="md" className="ring-2 ring-white/20" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm text-white">{user.name}</span>
-            <span className="block truncate text-xs text-gray-400">{user.email}</span>
+            <span className="block truncate text-xs text-sidebar-muted">{user.email}</span>
           </span>
         </button>
         <button
-          className="rounded p-1.5 text-gray-400 hover:bg-sidebar-hover hover:text-white"
+          className={clsx('rounded p-1.5 text-sidebar-muted hover:bg-sidebar-hover hover:text-white', focusRing)}
           onClick={() => void logout()}
           aria-label="Log out"
           title="Log out"

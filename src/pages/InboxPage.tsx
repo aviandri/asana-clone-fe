@@ -89,8 +89,8 @@ export function InboxPage() {
         ) : (
           <ul aria-label="Notifications" className="mx-auto max-w-3xl divide-y divide-gray-100 px-4 py-2">
             {list.map((n) => (
-              <li key={n.id} className={clsx('group flex items-start gap-3 rounded-lg px-3 py-3', !n.read && 'bg-blue-50/60', n.task && panel.taskId === n.task.id && 'ring-1 ring-blue-300')}>
-                <span className={clsx('mt-2 h-2 w-2 shrink-0 rounded-full', n.read ? 'bg-transparent' : 'bg-blue-600')} aria-label={n.read ? undefined : 'Unread'} />
+              <li key={n.id} className={clsx('group flex items-start gap-3 rounded-lg px-3 py-3', !n.read && 'bg-primary-50/60', n.task && panel.taskId === n.task.id && 'ring-1 ring-primary-300')}>
+                <span className={clsx('mt-2 h-2 w-2 shrink-0 rounded-full', n.read ? 'bg-transparent' : 'bg-primary-600')} aria-label={n.read ? undefined : 'Unread'} />
                 <Avatar user={n.actor} size="md" />
                 <div className="min-w-0 flex-1">
                   <button
@@ -100,7 +100,7 @@ export function InboxPage() {
                     onClick={() => openItem(n)}
                   >
                     <span className="font-semibold">{n.actor.name}</span> {VERB[n.type]}{' '}
-                    {n.task ? <span className="font-medium text-blue-700 group-hover:underline">{n.task.title}</span> : <span className="italic text-gray-500">a deleted task</span>}
+                    {n.task ? <span className="font-medium text-primary-700 group-hover:underline">{n.task.title}</span> : <span className="italic text-gray-500">a deleted task</span>}
                   </button>
                   <time dateTime={n.createdAt} className="text-xs text-gray-500">
                     {timeAgo(n.createdAt)}

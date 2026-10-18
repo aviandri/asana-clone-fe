@@ -29,7 +29,7 @@ function NewTeamDialog({ onClose }: { onClose: () => void }) {
           <input id="nt-name" autoFocus className="input" value={name} onChange={(e) => setName(e.target.value)} required />
         </div>
         <div>
-          <label htmlFor="nt-desc" className="label">Description <span className="font-normal text-gray-400">(optional)</span></label>
+          <label htmlFor="nt-desc" className="label">Description <span className="font-normal text-gray-500">(optional)</span></label>
           <textarea id="nt-desc" rows={2} className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
         {create.isError && <p role="alert" className="text-sm text-red-600">{errorMessage(create.error)}</p>}

@@ -40,7 +40,7 @@ export function AcceptInvitePage() {
 
   if (invite.isLoading) {
     return (
-      <AuthLayout title="Join your team">
+      <AuthLayout title="Join your team on Mekari Project">
         <div className="flex justify-center py-6">
           <Spinner />
         </div>
@@ -65,7 +65,7 @@ export function AcceptInvitePage() {
   }
 
   return (
-    <AuthLayout title="Join your team">
+    <AuthLayout title="Join your team on Mekari Project">
       <p className="mb-4 text-sm text-gray-600">
         You were invited as <strong>{invite.data?.email}</strong>. Set up your account to continue.
       </p>

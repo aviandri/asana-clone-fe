@@ -18,7 +18,7 @@ export function Avatar({
       <span
         aria-label="Unassigned"
         className={clsx(
-          'inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-gray-400 text-gray-400',
+          'inline-flex shrink-0 items-center justify-center rounded-full border border-dashed border-gray-400 text-gray-500',
           SIZES[size],
           className,
         )}

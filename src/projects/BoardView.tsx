@@ -78,8 +78,8 @@ function BoardCard({ task, canEdit }: { task: Task; canEdit: boolean }) {
         if (e.key === 'Enter' && !e.defaultPrevented) panel.open(task.id);
       }}
       className={clsx(
-        'cursor-pointer rounded-lg border bg-white p-3 shadow-sm outline-none hover:border-gray-300 focus-visible:ring-2 focus-visible:ring-blue-500',
-        panel.taskId === task.id ? 'border-blue-400' : 'border-gray-200',
+        'cursor-pointer rounded-lg border bg-white p-3 shadow-sm outline-none hover:border-gray-300 focus-visible:ring-2 focus-visible:ring-primary-500',
+        panel.taskId === task.id ? 'border-primary-400' : 'border-gray-200',
         isDragging && 'opacity-40',
       )}
     >
@@ -91,7 +91,7 @@ function BoardCard({ task, canEdit }: { task: Task; canEdit: boolean }) {
 function BoardQuickAdd({ onSubmit, onClose }: { onSubmit: (title: string) => void; onClose: () => void }) {
   const [title, setTitle] = useState('');
   return (
-    <div className="rounded-lg border border-blue-400 bg-white p-2 shadow-sm">
+    <div className="rounded-lg border border-primary-400 bg-white p-2 shadow-sm">
       <textarea
         autoFocus
         rows={2}
@@ -144,7 +144,7 @@ function Column({
   return (
     <section
       aria-label={name}
-      className={clsx('flex max-h-full w-72 shrink-0 flex-col rounded-xl bg-gray-100/70', isOver && 'ring-2 ring-blue-300')}
+      className={clsx('flex max-h-full w-72 shrink-0 flex-col rounded-xl bg-gray-100/70', isOver && 'ring-2 ring-primary-300')}
     >
       <header className="flex items-center gap-2 px-3 py-2.5">
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">{name}</h2>

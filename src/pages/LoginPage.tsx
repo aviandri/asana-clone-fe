@@ -32,7 +32,7 @@ export function LoginPage() {
   }
 
   return (
-    <AuthLayout title="Log in to your workspace">
+    <AuthLayout title="Log in to Mekari Project">
       <form onSubmit={onSubmit} className="space-y-4" noValidate>
         <div>
           <label htmlFor="email" className="label">

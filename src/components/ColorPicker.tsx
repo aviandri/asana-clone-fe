@@ -12,7 +12,7 @@ export function ColorPicker({ value, onChange }: { value: string; onChange: (c: 
           aria-checked={value.toLowerCase() === c}
           aria-label={c}
           onClick={() => onChange(c)}
-          className={clsx('h-6 w-6 rounded-md ring-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500', value.toLowerCase() === c && 'ring-2 ring-gray-900')}
+          className={clsx('h-6 w-6 rounded-md ring-offset-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500', value.toLowerCase() === c && 'ring-2 ring-gray-900')}
           style={{ backgroundColor: c }}
         />
       ))}

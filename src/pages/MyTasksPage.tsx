@@ -29,7 +29,7 @@ function MyTaskRow({ task }: { task: Task }) {
       role="row"
       aria-selected={panel.taskId === task.id}
       onClick={() => panel.open(task.id)}
-      className={clsx(GRID, 'group cursor-pointer border-b border-gray-100 text-sm hover:bg-gray-50', panel.taskId === task.id && 'bg-blue-50')}
+      className={clsx(GRID, 'group cursor-pointer border-b border-gray-100 text-sm hover:bg-gray-50', panel.taskId === task.id && 'bg-primary-50')}
     >
       <div role="cell" className="flex min-w-0 items-center gap-2 py-1.5 pl-6 pr-2">
         <CompleteToggle
@@ -62,7 +62,7 @@ function MyTaskRow({ task }: { task: Task }) {
             {task.title}
           </button>
         )}
-        {task.parentId && <span className="shrink-0 text-xs text-gray-400">subtask</span>}
+        {task.parentId && <span className="shrink-0 text-xs text-gray-500">subtask</span>}
       </div>
       <div role="cell" className="hidden min-w-0 px-2 md:block">
         {task.project ? (
@@ -76,7 +76,7 @@ function MyTaskRow({ task }: { task: Task }) {
             <span className="truncate">{task.project.name}</span>
           </Link>
         ) : (
-          <span className="text-xs text-gray-400">Personal</span>
+          <span className="text-xs text-gray-500">Personal</span>
         )}
       </div>
       <div role="cell" className="px-2">
@@ -116,7 +116,7 @@ function Bucket({ label, tasks, children }: { label: string; tasks: Task[]; chil
         <h2 id={id} className="px-1 text-base font-semibold">
           {label}
         </h2>
-        <span className="text-xs text-gray-400">{tasks.length}</span>
+        <span className="text-xs text-gray-500">{tasks.length}</span>
       </div>
       {!collapsed && (
         <div role="rowgroup">

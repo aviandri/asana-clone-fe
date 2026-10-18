@@ -72,7 +72,7 @@ function KrValueInput({ kr, onCommit, disabled }: { kr: KeyResult; onCommit: (v:
           ref.current?.blur();
         }
       }}
-      className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm tabular-nums focus:border-blue-500 focus:outline-none disabled:border-transparent disabled:bg-transparent"
+      className="w-24 rounded border border-gray-300 px-2 py-1 text-right text-sm tabular-nums focus:border-primary-500 focus:outline-none disabled:border-transparent disabled:bg-transparent"
     />
   );
 }

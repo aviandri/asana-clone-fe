@@ -74,7 +74,7 @@ export function NewGoalDialog({
         </div>
         <div>
           <label htmlFor="ng-desc" className="label">
-            Description <span className="font-normal text-gray-400">(optional)</span>
+            Description <span className="font-normal text-gray-500">(optional)</span>
           </label>
           <textarea id="ng-desc" rows={2} className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>

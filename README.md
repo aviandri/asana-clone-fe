@@ -1,6 +1,6 @@
-# asana-clone-fe
+# Mekari Project — web frontend
 
-Web frontend for the internal Asana clone. See [docs/SPEC.md](docs/SPEC.md) (mirrored from the BE repo; the BE copy is canonical).
+Web frontend for **Mekari Project**, Mekari's internal project-management tool (repo: `asana-clone-fe`). See [docs/SPEC.md](docs/SPEC.md) (mirrored from the BE repo; the BE copy is canonical).
 
 Stack: React 18 · Vite 5 · TypeScript (strict) · React Router 6 · TanStack Query 5 · Tailwind 3 · dnd-kit · date-fns · Vitest + Testing Library.
 
@@ -50,3 +50,13 @@ scripts/      contract-smoke.mjs (FE↔BE contract test against a running backen
 
 Keyboard: `⌘K`/`Ctrl+K` search · `Esc` closes the task panel/dialogs · double-click or `F2` renames a task in a list ·
 `Space` picks up/drops a focused board card (arrows move) · `⌘/Ctrl+Enter` posts a comment.
+
+## Brand
+
+- Product name: **Mekari Project**. Lockup and app icon live in `src/components/brand/Brand.tsx`;
+  favicons in `public/` (`favicon.svg`, `favicon-32.png`, `apple-touch-icon.png`).
+- The Mekari mark/wordmark paths come from Mekari's official logo (internal Mekari tool).
+- Product accent (app icon only): magenta `#B0136B → #E0257F → #FF5FA2`.
+- Design tokens are CSS variables in `src/index.css` (Mekari purple primary `#651FFF`, neutrals,
+  sidebar), exposed as Tailwind scales in `tailwind.config.js`. Contrast ratios are documented there.
+

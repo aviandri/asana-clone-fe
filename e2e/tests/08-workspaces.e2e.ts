@@ -2,8 +2,6 @@ import { ACME, ALICE, MEKARI, expect, loginViaUi, test } from '../fixtures';
 
 // alice is in two workspaces (SPEC §12 seed), so she gets the switcher menu and the rail.
 // Logs in as alice in a fresh context; each test restores her current workspace to Mekari.
-// v1.2 (SPEC §12) isn't on main yet; opt in with E2E_WORKSPACES=1 once the workspace PRs land.
-test.skip(!process.env.E2E_WORKSPACES, 'needs SPEC §12 workspaces (set E2E_WORKSPACES=1)');
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test.beforeEach(async ({ page }) => {

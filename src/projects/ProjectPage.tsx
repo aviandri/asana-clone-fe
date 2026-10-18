@@ -15,6 +15,7 @@ import { BoardView } from './BoardView';
 import { CalendarView } from './CalendarView';
 import { ListView } from './ListView';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
+import { useFollowWorkspace } from '@/workspace/useWorkspace';
 
 const VIEWS: { key: Lowercase<ProjectView> | 'dashboard'; label: string; icon: ReactNode }[] = [
   { key: 'list', label: 'List', icon: <ListIcon className="h-3.5 w-3.5" /> },
@@ -105,6 +106,7 @@ export function ProjectPage() {
   const user = useCurrentUser();
   const project = useProject(projectId);
   const tasks = useProjectTasks(projectId);
+  useFollowWorkspace(project.data?.workspaceId, 'project');
   const [filter, setFilter] = useState<CompletionFilter>('incomplete');
   const [addingTo, setAddingTo] = useState<string | null>(null);
 

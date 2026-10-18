@@ -1,6 +1,8 @@
 // Response/request shapes from docs/SPEC.md §5–6. Keep in sync with the BE contract.
 
-export type Role = 'ADMIN' | 'MEMBER';
+/** Role in the current workspace (SPEC §12). */
+export type WorkspaceRole = 'ADMIN' | 'MEMBER' | 'GUEST';
+export type Role = WorkspaceRole;
 export type Privacy = 'PUBLIC' | 'TEAM' | 'PRIVATE';
 export type ProjectView = 'LIST' | 'BOARD' | 'CALENDAR';
 export type ProjectRole = 'OWNER' | 'EDITOR' | 'COMMENTER';
@@ -19,10 +21,38 @@ export type ActivityType =
   | 'DESCRIPTION_CHANGED';
 
 export type UserSummary = { id: string; name: string; email: string; avatarColor: string };
+/** `role` is the role in the *current* workspace; for /admin/users `isActive` is the membership. */
 export type User = UserSummary & { role: Role; isActive: boolean; createdAt: string };
+
+// ---- Workspaces (SPEC §12, v1.2) ----
+
+export type Workspace = {
+  id: string;
+  name: string;
+  isOrganization: boolean;
+  domain: string | null;
+  color: string;
+  myRole: WorkspaceRole;
+  /** active members incl. guests */
+  memberCount: number;
+  createdAt: string;
+};
+export type WorkspaceRef = { id: string; name: string; color: string };
+/** `workspaces` are sorted by name. */
+export type Me = User & { currentWorkspace: Workspace | null; workspaces: Workspace[] };
+export type PendingInvite = {
+  id: string;
+  workspace: WorkspaceRef;
+  role: WorkspaceRole;
+  invitedBy: UserSummary;
+  expiresAt: string;
+};
+export type JoinableWorkspace = WorkspaceRef & { memberCount: number };
+export type InviteInfo = { id: string; email: string; role: WorkspaceRole; workspace: WorkspaceRef; existingUser: boolean };
 
 export type Team = {
   id: string;
+  workspaceId: string;
   name: string;
   description: string | null;
   memberCount: number;
@@ -34,6 +64,7 @@ export type Section = { id: string; projectId: string; name: string; position: n
 
 export type Project = {
   id: string;
+  workspaceId: string;
   teamId: string;
   name: string;
   description: string | null;
@@ -58,6 +89,7 @@ export type TaskProjectRef = { id: string; name: string; color: string };
 
 export type Task = {
   id: string;
+  workspaceId: string;
   projectId: string | null;
   sectionId: string | null;
   parentId: string | null;
@@ -107,6 +139,7 @@ export type Story = CommentStory | ActivityStory;
 
 export type Notification = {
   id: string;
+  workspaceId: string;
   type: NotificationType;
   read: boolean;
   createdAt: string;
@@ -116,6 +149,7 @@ export type Notification = {
 
 export type Invite = {
   id: string;
+  workspaceId: string;
   email: string;
   role: Role;
   token: string;
@@ -200,6 +234,7 @@ export type MetricType = 'NUMBER' | 'PERCENT' | 'CURRENCY' | 'BOOLEAN';
 
 export type Goal = {
   id: string;
+  workspaceId: string;
   title: string;
   description: string | null;
   owner: UserSummary;

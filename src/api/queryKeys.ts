@@ -1,5 +1,8 @@
 export const qk = {
   me: ['me'] as const,
+  myInvites: ['myInvites'] as const,
+  joinable: ['joinableWorkspaces'] as const,
+  workspaceUnread: (id: string) => ['workspaceUnread', id] as const,
   users: (q = '') => ['users', q] as const,
   teams: (mine = false) => ['teams', { mine }] as const,
   team: (id: string) => ['team', id] as const,

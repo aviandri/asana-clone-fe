@@ -10,11 +10,13 @@ import { Avatar } from '@/components/Avatar';
 import { ColorPicker } from '@/components/ColorPicker';
 import { Modal } from '@/components/Modal';
 import { PageHeader } from '@/components/PageHeader';
+import { Spinner } from '@/components/Spinner';
 import { errorMessage } from '@/lib/errors';
 import { showToast } from '@/lib/toast';
 import { LeaveWorkspaceDialog } from '../LeaveWorkspaceDialog';
 import { useExitWorkspace, useRefreshMe } from '../useWorkspace';
 import { WorkspaceTile } from '../WorkspaceTile';
+import { invalidateMembershipViews } from './invalidate';
 import { InvitesTab, MembersTab } from './MembersTabs';
 import { isExternal } from './roles';
 
@@ -87,7 +89,11 @@ function GeneralTab({ ws }: { ws: Workspace }) {
         </form>
       </Section>
       <Section title="Leave workspace">
-        <p className="mb-3 text-sm text-gray-600">Leave {ws.name}. A workspace always keeps at least one admin, so make someone else an admin first if you’re the only one.</p>
+        <p className="mb-3 text-sm text-gray-600">
+          {ws.memberCount <= 1
+            ? `You’re the only member of ${ws.name}. To close it, delete it in the Danger zone.`
+            : `Leave ${ws.name}. A workspace always keeps at least one admin, so make someone else an admin first if you’re the only one.`}
+        </p>
         <button type="button" className="btn-secondary" onClick={() => setLeaving(true)}>
           Leave workspace
         </button>
@@ -110,15 +116,22 @@ function OrganizationTab({ ws }: { ws: Workspace }) {
   const [domain, setDomain] = useState(ws.domain ?? me.email.split('@')[1] ?? '');
   const [confirming, setConfirming] = useState(false);
   const [turningOff, setTurningOff] = useState(false);
+  const [domainError, setDomainError] = useState<string | null>(null);
   const update = useUpdateWorkspace(ws);
   const clean = domain.trim().toLowerCase().replace(/^@/, '');
   const affected = wouldBecomeGuests(users.data, clean);
   const changed = !ws.isOrganization || clean !== ws.domain;
 
-  const afterMembershipChange = () => {
-    void qc.invalidateQueries({ queryKey: qk.adminUsers });
-    void qc.invalidateQueries({ queryKey: qk.adminInvites });
-    void qc.invalidateQueries({ queryKey: ['users'] });
+  const afterMembershipChange = () => invalidateMembershipViews(qc);
+  const openConfirm = () => {
+    // The BE requires the caller's own email on the domain (400); say so before the dialog.
+    if (!me.email.toLowerCase().endsWith(`@${clean}`)) {
+      setDomainError(`Your own email (${me.email}) must be on ${clean} to use it as the organization’s domain.`);
+      return;
+    }
+    setDomainError(null);
+    update.reset();
+    setConfirming(true);
   };
   const convert = () =>
     update.mutate(
@@ -133,7 +146,6 @@ function OrganizationTab({ ws }: { ws: Workspace }) {
             'info',
           );
         },
-        onError: () => setConfirming(false),
       },
     );
   const turnOff = () =>
@@ -160,7 +172,7 @@ function OrganizationTab({ ws }: { ws: Workspace }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (clean && changed) setConfirming(true);
+            if (clean && changed) openConfirm();
           }}
           className="flex flex-wrap items-end gap-3"
         >
@@ -168,13 +180,30 @@ function OrganizationTab({ ws }: { ws: Workspace }) {
             <label htmlFor="ws-domain" className="label">
               Email domain
             </label>
-            <input id="ws-domain" className="input" value={domain} placeholder="mekari.com" onChange={(e) => setDomain(e.target.value)} required />
+            <input
+              id="ws-domain"
+              className="input"
+              value={domain}
+              placeholder="mekari.com"
+              aria-invalid={!!domainError}
+              aria-describedby={domainError ? 'ws-domain-error' : undefined}
+              onChange={(e) => {
+                setDomain(e.target.value);
+                setDomainError(null);
+              }}
+              required
+            />
           </div>
           <button type="submit" className="btn-primary py-2" disabled={!clean || !changed || update.isPending}>
             {ws.isOrganization ? 'Change domain' : 'Convert to organization'}
           </button>
         </form>
-        {update.isError && (
+        {domainError && (
+          <p id="ws-domain-error" role="alert" className="mt-3 text-sm text-red-600">
+            {domainError}
+          </p>
+        )}
+        {update.isError && !confirming && (
           <p role="alert" className="mt-3 text-sm text-red-600">
             {errorMessage(update.error)}
           </p>
@@ -191,7 +220,19 @@ function OrganizationTab({ ws }: { ws: Workspace }) {
 
       <Modal open={confirming} onClose={() => setConfirming(false)} title={ws.isOrganization ? `Change domain to ${clean}?` : `Convert to an organization on ${clean}?`}>
         <div className="space-y-4 px-5 pb-5 pt-2 text-sm text-gray-600">
-          {affected.length === 0 ? (
+          {/* Never say "no roles change" before we actually know who's in the workspace. */}
+          {users.isPending ? (
+            <p className="flex items-center gap-2" role="status">
+              <Spinner /> Checking who would become a guest…
+            </p>
+          ) : users.isError ? (
+            <div role="alert" className="rounded-md bg-red-50 px-3 py-2 text-red-700">
+              Couldn’t load the member list, so we can’t show who would become a guest. {errorMessage(users.error)}{' '}
+              <button type="button" className="font-medium underline" onClick={() => void users.refetch()}>
+                Try again
+              </button>
+            </div>
+          ) : affected.length === 0 ? (
             <p>Everyone in {ws.name} is on {clean} or already a guest, so no roles change.</p>
           ) : (
             <>
@@ -210,12 +251,17 @@ function OrganizationTab({ ws }: { ws: Workspace }) {
               </ul>
             </>
           )}
-          <p>Pending invites to people outside {clean} become guest invites.</p>
+          <p>Deactivated members and pending invites outside {clean} become guests too, so they can’t come back as members later.</p>
+          {update.isError && (
+            <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-red-700">
+              {errorMessage(update.error)}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <button type="button" className="btn-secondary" onClick={() => setConfirming(false)}>
               Cancel
             </button>
-            <button type="button" className="btn-primary" disabled={update.isPending} onClick={convert}>
+            <button type="button" className="btn-primary" disabled={!users.isSuccess || update.isPending} onClick={convert}>
               {ws.isOrganization ? 'Change domain' : 'Convert'}
             </button>
           </div>

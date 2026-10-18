@@ -343,7 +343,8 @@ export default function ReportingPage() {
       <div role="tabpanel" aria-label={TABS.find((t) => t.key === tab)!.label} className="min-h-0 flex-1 overflow-y-auto bg-gray-50 p-6">
         <div className="mx-auto max-w-6xl space-y-4">
           {tab !== 'goals' && !isGuest && <TeamFilter value={teamId} onChange={(v) => set('team', v)} />}
-          {tab === 'overview' && <OverviewTab teamId={teamId} />}
+          {/* Guests have no teams: never send a stale ?team= for them. */}
+          {tab === 'overview' && <OverviewTab teamId={isGuest ? '' : teamId} />}
           {tab === 'workload' && <WorkloadTab teamId={teamId} />}
           {tab === 'goals' && <GoalsTab />}
         </div>

@@ -7,6 +7,7 @@ import { AuthProvider } from '@/auth/AuthProvider';
 import { RedirectIfAuthed, RequireAdmin, RequireAuth } from '@/auth/guards';
 import { FullPageSpinner } from '@/components/Spinner';
 import { AppShell } from '@/layout/AppShell';
+import { MotionRoot } from '@/motion/MotionRoot';
 import { AcceptInvitePage } from '@/pages/AcceptInvitePage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
@@ -24,7 +25,9 @@ export const routes: RouteObject[] = [
   {
     element: (
       <AuthProvider>
-        <Outlet />
+        <MotionRoot>
+          <Outlet />
+        </MotionRoot>
       </AuthProvider>
     ),
     children: [

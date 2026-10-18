@@ -12,13 +12,29 @@ import { positionAtEnd } from '@/lib/position';
 import { AssigneeField, CompleteToggle, DueDateField, PrioritySelect } from '@/tasks/fields';
 import { useCreateTask, useUpdateTask } from '@/tasks/useTaskMutations';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
+import { originOf, useToggleComplete } from '@/tasks/useToggleComplete';
+import { staggerDelay } from '@/motion/tokens';
 import { NO_SECTION, useSectionDnd } from './useSectionDnd';
 import { useSectionMutations } from './useSectionMutations';
 
 const GRID = 'grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_10rem_8rem_7rem] items-center';
 
-export function TaskRow({ task, canEdit }: { task: Task; canEdit: boolean }) {
+export function TaskRow({
+  task,
+  canEdit,
+  index = 0,
+  lastOpenInSection = false,
+}: {
+  task: Task;
+  canEdit: boolean;
+  /** position in its section — staggers the entry fade (max 10 items, 20ms apart) */
+  index?: number;
+  /** completing this task empties the section → celebration */
+  lastOpenInSection?: boolean;
+}) {
   const update = useUpdateTask();
+  const toggleComplete = useToggleComplete();
+  const [settling, setSettling] = useState(false);
   const panel = useTaskPanel();
   const [renaming, setRenaming] = useState(false);
   const selected = panel.taskId === task.id;
@@ -29,14 +45,16 @@ export function TaskRow({ task, canEdit }: { task: Task; canEdit: boolean }) {
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
+      style={{ transform: CSS.Translate.toString(transform), transition, animationDelay: `${staggerDelay(index)}s` }}
+      onAnimationEnd={() => setSettling(false)}
       role="row"
       aria-selected={selected}
       data-testid={`task-row-${task.id}`}
       onClick={() => panel.open(task.id)}
       className={clsx(
         GRID,
-        'group cursor-pointer border-b border-gray-100 text-sm hover:bg-gray-50',
+        'group cursor-pointer border-b border-gray-100 text-sm transition-colors duration-150 hover:bg-gray-50',
+        settling ? 'animate-settle motion-reduce:animate-none' : 'animate-fade-in',
         selected && 'bg-primary-50 hover:bg-primary-50',
         isDragging && 'opacity-40',
       )}
@@ -58,7 +76,11 @@ export function TaskRow({ task, canEdit }: { task: Task; canEdit: boolean }) {
         <CompleteToggle
           completed={task.completed}
           label={task.completed ? `Mark "${task.title}" incomplete` : `Mark "${task.title}" complete`}
-          onToggle={() => canEdit && update.mutate({ id: task.id, patch: { completed: !task.completed } })}
+          onToggle={(e) => {
+            if (!canEdit) return;
+            if (!task.completed) setSettling(true);
+            toggleComplete(task, { lastOpenInSection, origin: originOf(e.currentTarget) });
+          }}
         />
         {renaming ? (
           <InlineText
@@ -226,6 +248,7 @@ function SectionBlock({
   setAdding: (v: boolean) => void;
 }) {
   const tasks = ids.map((id) => byId.get(id)).filter((t): t is Task => !!t);
+  const openCount = tasks.filter((t) => !t.completed).length;
   const { setNodeRef } = useDroppable({ id: section?.id ?? NO_SECTION });
   const [collapsed, setCollapsed] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -296,8 +319,8 @@ function SectionBlock({
       {!collapsed && (
         <div role="rowgroup">
           <SortableContext id={section?.id ?? NO_SECTION} items={ids} strategy={verticalListSortingStrategy}>
-            {tasks.map((t) => (
-              <TaskRow key={t.id} task={t} canEdit={canEdit} />
+            {tasks.map((t, i) => (
+              <TaskRow key={t.id} task={t} canEdit={canEdit} index={i} lastOpenInSection={!t.completed && openCount === 1} />
             ))}
           </SortableContext>
           {adding && (

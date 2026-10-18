@@ -8,7 +8,7 @@ import { useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
 import { BoardIcon, CalendarIcon, ChartIcon, ListIcon, PlusIcon, SettingsIcon } from '@/components/icons';
 import { EmptyState, ErrorState } from '@/components/PageHeader';
-import { FullPageSpinner } from '@/components/Spinner';
+import { ListSkeleton, BoardSkeleton, DashboardSkeleton } from '@/components/Skeleton';
 import { canEditProjectContent } from '@/lib/permissions';
 import type { CompletionFilter } from '@/lib/taskFilters';
 import { BoardView } from './BoardView';
@@ -108,10 +108,10 @@ export function ProjectPage() {
   const [filter, setFilter] = useState<CompletionFilter>('incomplete');
   const [addingTo, setAddingTo] = useState<string | null>(null);
 
-  if (project.isLoading) return <FullPageSpinner />;
+  if (project.isLoading) return <ListSkeleton label="Loading project" />;
   if (project.isError) {
     if (project.error instanceof ApiError && project.error.status === 404) {
-      return <EmptyState title="Project not found">It may have been deleted, or you don’t have access.</EmptyState>;
+      return <EmptyState illustration="search" title="Project not found">It may have been deleted, or you don’t have access.</EmptyState>;
     }
     return <ErrorState error={project.error} />;
   }
@@ -161,7 +161,7 @@ export function ProjectPage() {
       )}
       <div className="min-h-0 flex-1 overflow-auto">
         {tasks.isLoading ? (
-          <FullPageSpinner />
+          view === 'board' ? <BoardSkeleton /> : <ListSkeleton />
         ) : tasks.isError ? (
           <ErrorState error={tasks.error} />
         ) : view === 'list' ? (
@@ -171,7 +171,7 @@ export function ProjectPage() {
         ) : view === 'calendar' ? (
           <CalendarView {...props} />
         ) : view === 'dashboard' ? (
-          <Suspense fallback={<FullPageSpinner />}>
+          <Suspense fallback={<DashboardSkeleton />}>
             <ProjectDashboard projectId={p.id} />
           </Suspense>
         ) : (

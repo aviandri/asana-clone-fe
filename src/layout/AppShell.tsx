@@ -1,3 +1,4 @@
+import { AnimatePresence, m } from 'motion/react';
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
@@ -7,6 +8,7 @@ import { Toaster } from '@/components/Toaster';
 import { SearchPalette } from '@/search/SearchPalette';
 import { TaskPanel } from '@/tasks/TaskPanel';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
+import { DUR, EASE_OUT, exit, panelSpring } from '@/motion/tokens';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -42,6 +44,7 @@ export function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const location = useLocation();
   const { taskId } = useTaskPanel();
+  const section = location.pathname.split('/')[1] || 'home';
   const [searchOpen, setSearchOpen] = useState(false);
 
   // Global search: Cmd/Ctrl+K (works even while typing elsewhere).
@@ -79,17 +82,28 @@ export function AppShell() {
         {/* Content sits on a light card inset into the dark frame, like Slack. */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white md:rounded-tl-lg">
           <div className="relative flex min-h-0 flex-1">
-            <main className="min-w-0 flex-1 overflow-hidden">
+            {/* 120ms fade when switching sections (not between a project's views — no remount). */}
+            <m.main
+              key={section}
+              className="min-w-0 flex-1 overflow-hidden"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1, transition: { duration: DUR.fast, ease: EASE_OUT } }}
+            >
               <Outlet />
-            </main>
-            {taskId && (
-              <aside
-                key={taskId}
-                className="absolute inset-y-0 right-0 z-20 w-full border-l border-gray-200 bg-white shadow-xl sm:w-[32rem] lg:static lg:w-[36rem] lg:shrink-0 lg:shadow-none"
-              >
-                <TaskPanel taskId={taskId} />
-              </aside>
-            )}
+            </m.main>
+            <AnimatePresence>
+              {taskId && (
+                <m.aside
+                  key="task-panel"
+                  initial={{ x: 48, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1, transition: panelSpring }}
+                  exit={{ x: 32, opacity: 0, transition: exit }}
+                  className="absolute inset-y-0 right-0 z-20 w-full border-l border-gray-200 bg-white shadow-xl sm:w-[32rem] lg:static lg:w-[36rem] lg:shrink-0 lg:shadow-none"
+                >
+                  <TaskPanel key={taskId} taskId={taskId} />
+                </m.aside>
+              )}
+            </AnimatePresence>
           </div>
         </div>
       </div>

@@ -16,6 +16,7 @@ import { CommentComposer, StoryFeed } from './Stories';
 import { AssigneeField, CompleteToggle, DueDateField, PrioritySelect, UserPickerList } from './fields';
 import { useCreateTask, useDeleteTask, useFollowTask, useUpdateTask } from './useTaskMutations';
 import { useTaskPanel } from './useTaskPanel';
+import { useToggleComplete } from './useToggleComplete';
 
 function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -72,6 +73,7 @@ function AutoTextarea({
 
 function SubtaskList({ task, canEdit }: { task: TaskDetail; canEdit: boolean }) {
   const update = useUpdateTask();
+  const toggleComplete = useToggleComplete();
   const create = useCreateTask();
   const panel = useTaskPanel();
   const [adding, setAdding] = useState(false);
@@ -93,7 +95,7 @@ function SubtaskList({ task, canEdit }: { task: TaskDetail; canEdit: boolean }) 
               size="sm"
               completed={s.completed}
               label={s.completed ? `Mark subtask "${s.title}" incomplete` : `Mark subtask "${s.title}" complete`}
-              onToggle={() => canEdit && update.mutate({ id: s.id, patch: { completed: !s.completed } })}
+              onToggle={() => canEdit && toggleComplete(s)}
             />
             <button
               type="button"
@@ -248,6 +250,7 @@ export function TaskPanel({ taskId }: { taskId: string }) {
   const panel = useTaskPanel();
   const { close } = panel;
   const me = useCurrentUser();
+  const toggleComplete = useToggleComplete();
   const task = useTask(taskId);
   const project = useProject(task.data?.projectId ?? undefined);
   const update = useUpdateTask();
@@ -305,7 +308,7 @@ export function TaskPanel({ taskId }: { taskId: string }) {
             type="button"
             disabled={!canEdit}
             aria-pressed={t.completed}
-            onClick={() => update.mutate({ id: t.id, patch: { completed: !t.completed } })}
+            onClick={() => toggleComplete(t)}
             className={clsx(
               'btn border py-1 text-xs',
               t.completed ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-gray-700 hover:border-green-600 hover:text-green-700',

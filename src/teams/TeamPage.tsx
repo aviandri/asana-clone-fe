@@ -29,7 +29,7 @@ export function TeamPage() {
 
   if (team.isLoading) return <FullPageSpinner />;
   if (team.isError) {
-    return team.error instanceof ApiError && team.error.status === 404 ? <EmptyState title="Team not found" /> : <ErrorState error={team.error} />;
+    return team.error instanceof ApiError && team.error.status === 404 ? <EmptyState illustration="search" title="Team not found" /> : <ErrorState error={team.error} />;
   }
   const t = team.data!;
   const isMember = t.members.some((u) => u.id === me.id);

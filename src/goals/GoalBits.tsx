@@ -22,7 +22,20 @@ export function StatusPill({ status, className }: { status: GoalStatus; classNam
   );
 }
 
-export function ProgressBar({ value, label, className, size = 'sm' }: { value: number; label: string; className?: string; size?: 'sm' | 'lg' }) {
+export function ProgressBar({
+  value,
+  label,
+  className,
+  size = 'sm',
+  delayMs = 0,
+}: {
+  value: number;
+  label: string;
+  className?: string;
+  size?: 'sm' | 'lg';
+  /** Stagger so cascaded roll-ups visibly flow upward (children first, parents after). */
+  delayMs?: number;
+}) {
   const v = Math.max(0, Math.min(100, value));
   return (
     <div className={clsx('flex items-center gap-2', className)}>
@@ -34,7 +47,11 @@ export function ProgressBar({ value, label, className, size = 'sm' }: { value: n
         aria-valuenow={Math.round(v * 10) / 10}
         className={clsx('flex-1 overflow-hidden rounded-full bg-gray-200', size === 'lg' ? 'h-2.5' : 'h-1.5')}
       >
-        <div className="h-full rounded-full bg-primary-600 transition-[width]" style={{ width: `${v}%` }} />
+        {/* transform-only (scaleX) so changes animate without layout work */}
+        <div
+          className="progress-fill h-full w-full origin-left rounded-full bg-primary-500 transition-transform duration-[400ms] ease-out"
+          style={{ transform: `scaleX(${v / 100})`, transitionDelay: `${delayMs}ms` }}
+        />
       </div>
       <span className={clsx('shrink-0 tabular-nums text-gray-700', size === 'lg' ? 'w-14 text-sm font-semibold' : 'w-11 text-xs')}>
         {Math.round(v)}%

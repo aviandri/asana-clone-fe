@@ -6,7 +6,7 @@ import { qk } from '@/api/queryKeys';
 import type { ProjectReport } from '@/api/types';
 import { Avatar } from '@/components/Avatar';
 import { ErrorState } from '@/components/PageHeader';
-import { FullPageSpinner } from '@/components/Spinner';
+import { DashboardSkeleton } from '@/components/Skeleton';
 import { dueTone, formatDue } from '@/lib/dates';
 import { PRIORITY_LABEL } from '@/lib/priority';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
@@ -51,7 +51,7 @@ export default function ProjectDashboard({ projectId }: { projectId: string }) {
     placeholderData: (prev) => prev, // hold the previous render while a new range loads
   });
 
-  if (report.isLoading) return <FullPageSpinner />;
+  if (report.isLoading) return <DashboardSkeleton />;
   if (report.isError) return <ErrorState error={report.error} />;
   const r = report.data!;
   const t = r.totals;

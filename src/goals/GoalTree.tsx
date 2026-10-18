@@ -131,7 +131,7 @@ export function GoalTree({ roots }: { roots: GoalNode[] }) {
             <Avatar user={g.owner} size="xs" />
             <span className="truncate text-xs text-gray-600">{g.owner.name.split(' ')[0]}</span>
           </div>
-          <ProgressBar value={g.progress} label={`${g.title} progress`} className="hidden md:flex" />
+          <ProgressBar value={g.progress} label={`${g.title} progress`} className="hidden md:flex" delayMs={Math.max(0, 4 - level) * 80} />
           <StatusPill status={g.status} className={clsx('justify-self-end md:justify-self-start')} />
         </div>
         {n.children.length > 0 && open && (

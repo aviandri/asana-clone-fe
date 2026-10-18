@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
 import { useUsers } from '@/api/hooks';
 import type { Priority, UserSummary } from '@/api/types';
 import { Avatar } from '@/components/Avatar';
@@ -16,10 +16,12 @@ export function CompleteToggle({
   label,
 }: {
   completed: boolean;
-  onToggle: () => void;
+  onToggle: (e: MouseEvent<HTMLButtonElement>) => void;
   size?: 'sm' | 'md';
   label: string;
 }) {
+  // Play the draw-in + pop only when the user completes it here (not on initial render).
+  const [celebrating, setCelebrating] = useState(0);
   return (
     <button
       type="button"
@@ -28,18 +30,28 @@ export function CompleteToggle({
       aria-label={label}
       onClick={(e) => {
         e.stopPropagation();
-        onToggle();
+        if (!completed) setCelebrating((n) => n + 1);
+        onToggle(e);
       }}
       className={clsx(
-        'inline-flex shrink-0 items-center justify-center rounded-full border transition-colors',
+        'inline-flex shrink-0 items-center justify-center rounded-full border transition-colors duration-150',
         size === 'sm' ? 'h-4 w-4' : 'h-[18px] w-[18px]',
         completed
           ? 'border-green-600 bg-green-600 text-white'
           : 'border-gray-400 text-transparent hover:border-green-600 hover:text-green-600',
+        completed && celebrating > 0 && 'animate-pop motion-reduce:animate-none',
       )}
     >
       <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.2} aria-hidden>
-        <path d="m4 8.5 2.5 2.5L12 5.5" />
+        <path
+          key={celebrating}
+          d="m4 8.5 2.5 2.5L12 5.5"
+          pathLength={1}
+          strokeDasharray={1}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={clsx(completed && celebrating > 0 && 'animate-check-draw motion-reduce:animate-none')}
+        />
       </svg>
     </button>
   );

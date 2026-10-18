@@ -10,18 +10,21 @@ import { Avatar } from '@/components/Avatar';
 import { InlineText } from '@/components/InlineText';
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon } from '@/components/icons';
 import { EmptyState, ErrorState } from '@/components/PageHeader';
-import { FullPageSpinner } from '@/components/Spinner';
+import { ListSkeleton } from '@/components/Skeleton';
 import { BUCKETS, groupByBucket } from '@/lib/buckets';
 import { filterByCompletion, type CompletionFilter } from '@/lib/taskFilters';
 import { QuickAddRow } from '@/projects/ListView';
 import { CompleteToggle, DueDateField, PrioritySelect } from '@/tasks/fields';
 import { useCreateTask, useUpdateTask } from '@/tasks/useTaskMutations';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
+import { useToggleComplete } from '@/tasks/useToggleComplete';
+import { staggerDelay } from '@/motion/tokens';
 
 const GRID = 'grid grid-cols-[minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1fr)_12rem_8rem_7rem] items-center';
 
-function MyTaskRow({ task }: { task: Task }) {
+function MyTaskRow({ task, index }: { task: Task; index: number }) {
   const update = useUpdateTask();
+  const toggleComplete = useToggleComplete();
   const panel = useTaskPanel();
   const [renaming, setRenaming] = useState(false);
   return (
@@ -29,13 +32,14 @@ function MyTaskRow({ task }: { task: Task }) {
       role="row"
       aria-selected={panel.taskId === task.id}
       onClick={() => panel.open(task.id)}
-      className={clsx(GRID, 'group cursor-pointer border-b border-gray-100 text-sm hover:bg-gray-50', panel.taskId === task.id && 'bg-primary-50')}
+      style={{ animationDelay: `${staggerDelay(index)}s` }}
+      className={clsx(GRID, 'group animate-rise-in cursor-pointer border-b border-gray-100 text-sm transition-colors duration-150 hover:bg-gray-50', panel.taskId === task.id && 'bg-primary-50')}
     >
       <div role="cell" className="flex min-w-0 items-center gap-2 py-1.5 pl-6 pr-2">
         <CompleteToggle
           completed={task.completed}
           label={task.completed ? `Mark "${task.title}" incomplete` : `Mark "${task.title}" complete`}
-          onToggle={() => update.mutate({ id: task.id, patch: { completed: !task.completed } })}
+          onToggle={() => toggleComplete(task)}
         />
         {renaming ? (
           <InlineText
@@ -121,8 +125,8 @@ function Bucket({ label, tasks, children }: { label: string; tasks: Task[]; chil
       {!collapsed && (
         <div role="rowgroup">
           {children}
-          {tasks.map((t) => (
-            <MyTaskRow key={t.id} task={t} />
+          {tasks.map((t, i) => (
+            <MyTaskRow key={t.id} task={t} index={i} />
           ))}
         </div>
       )}
@@ -164,7 +168,7 @@ export function MyTasksPage() {
       </div>
       <div className="min-h-0 flex-1 overflow-auto pb-24">
         {tasks.isLoading ? (
-          <FullPageSpinner />
+          <ListSkeleton />
         ) : tasks.isError ? (
           <ErrorState error={tasks.error} />
         ) : (
@@ -189,7 +193,7 @@ export function MyTasksPage() {
             ))}
             {total === 0 && !adding && (
               <EmptyState title={filter === 'completed' ? 'No completed tasks yet' : 'You’re all caught up'}>
-                Tasks assigned to you show up here.
+                {filter === 'completed' ? 'Finish a task and it’ll show up here.' : 'Nothing on your plate right now. Enjoy the calm — new tasks assigned to you land here.'}
               </EmptyState>
             )}
           </div>

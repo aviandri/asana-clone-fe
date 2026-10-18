@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
+import { AnimatePresence, m } from 'motion/react';
 import { useState } from 'react';
 import { notificationsApi } from '@/api/endpoints';
 import { useNotifications } from '@/api/hooks';
@@ -7,9 +8,10 @@ import { qk } from '@/api/queryKeys';
 import type { Notification, NotificationsResponse } from '@/api/types';
 import { Avatar } from '@/components/Avatar';
 import { EmptyState, ErrorState } from '@/components/PageHeader';
-import { FullPageSpinner } from '@/components/Spinner';
+import { ListSkeleton } from '@/components/Skeleton';
 import { timeAgo } from '@/lib/dates';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
+import { enter, exit, staggerDelay } from '@/motion/tokens';
 
 const VERB: Record<Notification['type'], string> = {
   ASSIGNED: 'assigned you to',
@@ -79,17 +81,25 @@ export function InboxPage() {
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {notifications.isLoading ? (
-          <FullPageSpinner />
+          <ListSkeleton label="Loading notifications" rows={6} />
         ) : notifications.isError ? (
           <ErrorState error={notifications.error} />
         ) : list.length === 0 ? (
-          <EmptyState title={tab === 'unread' ? 'No unread notifications' : 'Your inbox is empty'}>
-            You’ll be notified here when someone assigns you a task, mentions you, or comments on tasks you follow.
+          <EmptyState illustration="inbox" title={tab === 'unread' ? 'No unread notifications' : 'Your inbox is empty'}>
+            {tab === 'unread' ? 'You’re all caught up — nice work. ' : 'Nothing here yet. '}
+            We’ll let you know when someone assigns you a task, mentions you, or comments on something you follow.
           </EmptyState>
         ) : (
           <ul aria-label="Notifications" className="mx-auto max-w-3xl divide-y divide-gray-100 px-4 py-2">
-            {list.map((n) => (
-              <li key={n.id} className={clsx('group flex items-start gap-3 rounded-lg px-3 py-3', !n.read && 'bg-primary-50/60', n.task && panel.taskId === n.task.id && 'ring-1 ring-primary-300')}>
+            <AnimatePresence initial={false}>
+            {list.map((n, i) => (
+              <m.li
+                key={n.id}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0, transition: { ...enter, delay: staggerDelay(i) } }}
+                exit={{ opacity: 0, x: 24, transition: exit }}
+                className={clsx('group flex items-start gap-3 rounded-lg px-3 py-3 transition-colors duration-150', !n.read && 'bg-primary-50/60', n.task && panel.taskId === n.task.id && 'ring-1 ring-primary-300')}
+              >
                 <span className={clsx('mt-2 h-2 w-2 shrink-0 rounded-full', n.read ? 'bg-transparent' : 'bg-primary-600')} aria-label={n.read ? undefined : 'Unread'} />
                 <Avatar user={n.actor} size="md" />
                 <div className="min-w-0 flex-1">
@@ -111,8 +121,9 @@ export function InboxPage() {
                     Mark as read
                   </button>
                 )}
-              </li>
+              </m.li>
             ))}
+            </AnimatePresence>
           </ul>
         )}
       </div>

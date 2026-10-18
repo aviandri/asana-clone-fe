@@ -60,3 +60,11 @@ Keyboard: `⌘K`/`Ctrl+K` search · `Esc` closes the task panel/dialogs · doubl
 - Design tokens are CSS variables in `src/index.css` (Mekari purple primary `#651FFF`, neutrals,
   sidebar), exposed as Tailwind scales in `tailwind.config.js`. Contrast ratios are documented there.
 
+
+## Motion
+
+Fast, friendly, never in the way (Slack as the reference). `motion` via `LazyMotion` with the
+`domMin` feature set loaded asynchronously (`src/motion/`), plus CSS keyframes in `tailwind.config.js`.
+Rules: 120–220ms, ease-out in / ease-in out, springs for panels and drops, transform/opacity only,
+list stagger ≤ 10 items × 20ms, nothing blocks input. `prefers-reduced-motion`: fades only — no
+movement, no celebrations, count-ups jump. Celebrations can be turned off in **My profile**.

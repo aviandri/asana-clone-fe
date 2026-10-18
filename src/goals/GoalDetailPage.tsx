@@ -14,6 +14,7 @@ import { timeAgo } from '@/lib/dates';
 import { errorMessage } from '@/lib/errors';
 import { formatMetric, GOAL_STATUS, GOAL_STATUSES, goalLevelLabel, PROGRESS_SOURCE_LABEL } from '@/lib/goals';
 import { periodLabel } from '@/lib/periods';
+import { celebrate } from '@/lib/celebrations';
 import { AssigneeField } from '@/tasks/fields';
 import { ProgressBar, StatusPill } from './GoalBits';
 import { NewGoalDialog } from './NewGoalDialog';
@@ -416,10 +417,21 @@ export function GoalDetailPage() {
   const [addingKr, setAddingKr] = useState(false);
   const [addingSub, setAddingSub] = useState(false);
 
+  // Celebrate when a goal crosses into 100% or ACHIEVED while you're looking at it (not on load).
+  const seen = useRef<{ id: string; progress: number; status: string } | null>(null);
+  const data = goal.data;
+  useEffect(() => {
+    if (!data) return;
+    const prev = seen.current;
+    seen.current = { id: data.id, progress: data.progress, status: data.status };
+    if (!prev || prev.id !== data.id) return;
+    if ((prev.progress < 100 && data.progress >= 100) || (prev.status !== 'ACHIEVED' && data.status === 'ACHIEVED')) celebrate();
+  }, [data]);
+
   if (goal.isLoading) return <FullPageSpinner />;
   if (goal.isError) {
     return goal.error instanceof ApiError && goal.error.status === 404 ? (
-      <EmptyState title="Goal not found">
+      <EmptyState illustration="search" title="Goal not found">
         <Link to="/goals" className="btn-secondary mt-2">
           Back to goals
         </Link>
@@ -507,7 +519,7 @@ export function GoalDetailPage() {
         <div className="mt-6 rounded-xl border border-gray-200 p-4">
           <div className="flex flex-wrap items-center gap-3">
             <StatusPill status={g.status} />
-            <ProgressBar value={g.progress} label="Goal progress" size="lg" className="min-w-[12rem] flex-1" />
+            <ProgressBar value={g.progress} label="Goal progress" size="lg" className="min-w-[12rem] flex-1" delayMs={120} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-sm text-gray-600">

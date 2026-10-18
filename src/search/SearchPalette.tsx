@@ -75,7 +75,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
   return (
     <Modal open={open} onClose={close} title="Search" hideTitle position="top" className="max-w-xl">
       <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
-        <SearchIcon className="h-5 w-5 text-gray-400" />
+        <SearchIcon className="h-5 w-5 text-gray-500" />
         <input
           autoFocus
           role="combobox"
@@ -104,7 +104,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
           }}
         />
         {results.isFetching && <Spinner className="h-4 w-4" />}
-        <kbd className="hidden rounded border border-gray-200 px-1.5 text-xs text-gray-400 sm:inline">Esc</kbd>
+        <kbd className="hidden rounded border border-gray-200 px-1.5 text-xs text-gray-500 sm:inline">Esc</kbd>
       </div>
       <div id="search-results" role="listbox" aria-label="Search results" className="max-h-[60vh] overflow-y-auto py-2">
         {q.trim().length < 2 ? (
@@ -119,7 +119,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
             if (groupItems.length === 0) return null;
             return (
               <div key={g.kind} role="group" aria-label={g.title}>
-                <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-400">{g.title}</div>
+                <div className="px-4 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-500">{g.title}</div>
                 {groupItems.map(({ it, i }) => (
                   <div
                     key={`${it.kind}-${it.id}`}
@@ -128,9 +128,9 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
                     aria-selected={i === active}
                     onMouseEnter={() => setActive(i)}
                     onClick={() => choose(it)}
-                    className={clsx('mx-2 flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm', i === active && 'bg-blue-50')}
+                    className={clsx('mx-2 flex cursor-pointer items-center gap-3 rounded-md px-2 py-1.5 text-sm', i === active && 'bg-primary-50')}
                   >
-                    {it.kind === 'task' && <CheckCircleIcon className={clsx('h-4 w-4 shrink-0', it.completed ? 'text-green-600' : 'text-gray-400')} />}
+                    {it.kind === 'task' && <CheckCircleIcon className={clsx('h-4 w-4 shrink-0', it.completed ? 'text-green-600' : 'text-gray-500')} />}
                     {it.kind === 'project' && <span className="h-3.5 w-3.5 shrink-0 rounded" style={{ backgroundColor: it.color }} />}
                     {it.kind === 'user' && <Avatar user={{ name: it.label, avatarColor: it.color }} size="xs" />}
                     <span className={clsx('min-w-0 flex-1 truncate', it.kind === 'task' && it.completed && 'text-gray-500 line-through')}>{it.label}</span>

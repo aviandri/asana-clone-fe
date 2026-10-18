@@ -63,7 +63,7 @@ function AutoTextarea({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => draft !== value && onCommit(draft)}
       className={clsx(
-        'w-full resize-none overflow-hidden rounded border border-transparent bg-transparent px-2 py-1 hover:border-gray-300 focus:border-blue-500 focus:outline-none disabled:hover:border-transparent',
+        'w-full resize-none overflow-hidden rounded border border-transparent bg-transparent px-2 py-1 hover:border-gray-300 focus:border-primary-500 focus:outline-none disabled:hover:border-transparent',
         className,
       )}
     />
@@ -122,7 +122,7 @@ function SubtaskList({ task, canEdit }: { task: TaskDetail; canEdit: boolean }) 
               autoFocus
               aria-label="New subtask name"
               placeholder="Write a subtask name"
-              className="min-w-0 flex-1 rounded border border-blue-500 px-1 py-0.5 text-sm focus:outline-none"
+              className="min-w-0 flex-1 rounded border border-primary-500 px-1 py-0.5 text-sm focus:outline-none"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onBlur={() => {

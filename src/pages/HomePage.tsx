@@ -41,7 +41,7 @@ export function HomePage() {
           <section className="rounded-xl border border-gray-200 bg-white p-5">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-semibold">My tasks</h2>
-              <Link to="/my-tasks" className="text-sm text-blue-600 hover:underline">
+              <Link to="/my-tasks" className="text-sm text-primary-600 hover:underline">
                 View all
               </Link>
             </div>

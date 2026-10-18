@@ -2,7 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Mekari Project design tokens (RGB channels so Tailwind can apply alpha).
+ * Contrast (WCAG 2.1, checked): text #232933 on white 14.6:1 · muted #626B79 5.4:1 ·
+ * primary #651FFF on white 6.6:1 (links, focus rings) · white on primary 6.6:1 ·
+ * sidebar text #E9E3FF on #2A0B6B 12.4:1 · sidebar muted #B9A9E8 7.3:1 ·
+ * white on active #5B2BD6 7.6:1 · sidebar focus ring #B794FF 6.4:1 · white on badge #E11D48 4.7:1.
+ * Subtle #8B95A5 is 3.0:1 — icons/decoration only, never body text.
+ */
 @layer base {
+  :root {
+    /* Mekari purple — primary #651FFF, hover #5B0FFF, pressed #40149E, tint #EFE7FF */
+    --primary-50: 246 242 255;
+    --primary-100: 239 231 255;
+    --primary-200: 220 203 255;
+    --primary-300: 183 148 255;
+    --primary-400: 143 92 255;
+    --primary-500: 101 31 255;
+    --primary-600: 91 15 255;
+    --primary-700: 64 20 158;
+    --primary-800: 46 14 115;
+    --primary-900: 30 9 80;
+    /* Neutrals */
+    --gray-50: 247 248 250;
+    --gray-100: 241 243 245;
+    --gray-200: 233 234 235;
+    --gray-300: 208 214 221;
+    --gray-400: 139 149 165;
+    --gray-500: 98 107 121;
+    --gray-600: 75 83 97;
+    --gray-700: 53 59 71;
+    --gray-800: 41 47 58;
+    --gray-900: 35 41 51;
+    --gray-950: 24 29 39;
+    --app-bg: 247 248 250;
+    --info: 75 97 221;
+    --info-soft: 234 237 252;
+    /* Product accent: Mekari Project magenta — logo/app icon (and celebrations) only */
+    --accent: 224 37 127;
+    --accent-soft: 255 209 230;
+    --badge: 225 29 72;
+    /* Sidebar — deep purple derived from #40149E */
+    --sidebar-top: 34 9 90;
+    --sidebar-bg: 42 11 107;
+    --sidebar-hover: 58 26 133;
+    --sidebar-active: 91 43 214;
+    --sidebar-text: 233 227 255;
+    --sidebar-muted: 185 169 232;
+    --sidebar-ring: 183 148 255;
+  }
+
   html,
   body,
   #root {
@@ -11,14 +60,17 @@
   body {
     @apply bg-white text-gray-900 antialiased;
   }
+  :focus-visible {
+    outline-color: rgb(var(--primary-500));
+  }
 }
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-blue-600 text-white hover:bg-blue-700;
+    @apply btn bg-primary-500 text-white hover:bg-primary-600 active:bg-primary-700;
   }
   .btn-secondary {
     @apply btn border border-gray-300 bg-white text-gray-700 hover:bg-gray-50;
@@ -30,7 +82,7 @@
     @apply btn bg-red-600 text-white hover:bg-red-700;
   }
   .input {
-    @apply block w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500;
+    @apply block w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder:text-gray-500 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500;
   }
   .label {
     @apply mb-1 block text-sm font-medium text-gray-700;

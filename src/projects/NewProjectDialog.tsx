@@ -68,7 +68,7 @@ export function NewProjectDialog({ open, onClose, teamId }: { open: boolean; onC
         </div>
         <div>
           <label htmlFor="np-desc" className="label">
-            Description <span className="font-normal text-gray-400">(optional)</span>
+            Description <span className="font-normal text-gray-500">(optional)</span>
           </label>
           <textarea id="np-desc" rows={2} className="input" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>

@@ -32,5 +32,5 @@ export function enableMocking() {
     save(db);
     location.reload();
   };
-  console.info('[mock] API is served by the in-browser mock backend. Log in as admin@example.com / password123');
+  console.info('[mock] Mekari Project API is served by the in-browser mock backend. Log in as admin@example.com / password123');
 }

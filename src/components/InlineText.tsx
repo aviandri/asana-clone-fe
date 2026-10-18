@@ -69,7 +69,7 @@ export function InlineText({
         }
       }}
       className={clsx(
-        'min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-gray-300 focus:border-blue-500 focus:bg-white focus:outline-none disabled:hover:border-transparent',
+        'min-w-0 rounded border border-transparent bg-transparent px-1 py-0.5 hover:border-gray-300 focus:border-primary-500 focus:bg-white focus:outline-none disabled:hover:border-transparent',
         className,
       )}
     />

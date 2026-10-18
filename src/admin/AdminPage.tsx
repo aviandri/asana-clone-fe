@@ -74,12 +74,12 @@ function UsersTab() {
             {list.map((u) => {
               const self = u.id === me.id;
               return (
-                <tr key={u.id} className={clsx(!u.isActive && 'text-gray-400')}>
+                <tr key={u.id} className={clsx(!u.isActive && 'text-gray-500')}>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-2">
                       <Avatar user={u} size="sm" />
                       <div className="min-w-0">
-                        <div className="truncate font-medium">{u.name}{self && <span className="ml-1 text-xs text-gray-400">(you)</span>}</div>
+                        <div className="truncate font-medium">{u.name}{self && <span className="ml-1 text-xs text-gray-500">(you)</span>}</div>
                         <div className="truncate text-xs text-gray-500">{u.email}</div>
                       </div>
                     </div>
@@ -107,7 +107,7 @@ function UsersTab() {
                     {!self && (
                       <button
                         type="button"
-                        className={clsx('text-xs hover:underline', u.isActive ? 'text-red-600' : 'text-blue-600')}
+                        className={clsx('text-xs hover:underline', u.isActive ? 'text-red-600' : 'text-primary-600')}
                         onClick={() => {
                           if (!u.isActive || window.confirm(`Deactivate ${u.name}? They won’t be able to log in.`)) {
                             update.mutate({ id: u.id, isActive: !u.isActive });

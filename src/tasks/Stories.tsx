@@ -28,12 +28,12 @@ export function CommentBody({ body }: { body: string }) {
         <Fragment key={i}>
           {t.kind === 'text' && t.text}
           {t.kind === 'mention' && (
-            <span className="rounded bg-blue-50 px-0.5 font-medium text-blue-700" data-user-id={t.userId}>
+            <span className="rounded bg-primary-50 px-0.5 font-medium text-primary-700" data-user-id={t.userId}>
               @{nameFor(t.userId, t.name)}
             </span>
           )}
           {t.kind === 'link' && (
-            <a href={t.href} target="_blank" rel="noopener noreferrer nofollow" className="text-blue-600 underline">
+            <a href={t.href} target="_blank" rel="noopener noreferrer nofollow" className="text-primary-600 underline">
               {t.href}
             </a>
           )}
@@ -93,7 +93,7 @@ function CommentItem({ story, task }: { story: CommentStory; task: TaskDetail })
           <time dateTime={story.createdAt} title={new Date(story.createdAt).toLocaleString()} className="text-xs text-gray-500">
             {timeAgo(story.createdAt)}
           </time>
-          {story.editedAt && <span className="text-xs text-gray-400">(edited)</span>}
+          {story.editedAt && <span className="text-xs text-gray-500">(edited)</span>}
           <span className="flex-1" />
           {mine && !editing && (
             <button type="button" className="text-xs text-gray-500 opacity-0 hover:underline focus:opacity-100 group-hover:opacity-100" onClick={() => { setDraft(story.body); setEditing(true); }}>
@@ -256,7 +256,7 @@ export function CommentComposer({ task }: { task: TaskDetail }) {
               <li key={u.id} role="option" aria-selected={i === highlight}>
                 <button
                   type="button"
-                  className={clsx('flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm', i === highlight ? 'bg-blue-50' : 'hover:bg-gray-100')}
+                  className={clsx('flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm', i === highlight ? 'bg-primary-50' : 'hover:bg-gray-100')}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => insertMention(u)}
                 >

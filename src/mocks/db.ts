@@ -229,7 +229,7 @@ export function createSeedDb(): MockDb {
       teamId: team.id,
       ownerId: owner.id,
       name,
-      description: `${name} — tracked in the Asana clone.`,
+      description: `${name} — tracked in Mekari Project.`,
       color,
       privacy,
       archived: false,

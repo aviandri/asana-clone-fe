@@ -23,8 +23,8 @@ function TaskChip({ task, canEdit }: { task: Task; canEdit: boolean }) {
       onClick={() => panel.open(task.id)}
       className={clsx(
         'block w-full truncate rounded px-1.5 py-0.5 text-left text-xs',
-        task.completed ? 'bg-gray-100 text-gray-500 line-through' : 'bg-blue-100 text-blue-900 hover:bg-blue-200',
-        panel.taskId === task.id && 'ring-1 ring-blue-500',
+        task.completed ? 'bg-gray-100 text-gray-500 line-through' : 'bg-primary-100 text-primary-900 hover:bg-primary-200',
+        panel.taskId === task.id && 'ring-1 ring-primary-500',
         isDragging && 'relative z-10 opacity-80 shadow',
       )}
     >
@@ -57,15 +57,15 @@ function DayCell({
       aria-label={label}
       className={clsx(
         'group flex min-h-[6.5rem] flex-col border-b border-r border-gray-200 p-1',
-        !isSameMonth(day, month) && 'bg-gray-50 text-gray-400',
-        isOver && 'bg-blue-50',
+        !isSameMonth(day, month) && 'bg-gray-50 text-gray-500',
+        isOver && 'bg-primary-50',
       )}
     >
       <div className="mb-1 flex items-center justify-between px-1">
         <span
           className={clsx(
             'flex h-6 min-w-6 items-center justify-center rounded-full text-xs',
-            isToday(day) && 'bg-brand-500 px-1.5 font-semibold text-white',
+            isToday(day) && 'bg-primary-500 px-1.5 font-semibold text-white',
           )}
         >
           {format(day, day.getDate() === 1 ? 'MMM d' : 'd')}
@@ -74,7 +74,7 @@ function DayCell({
           <button
             type="button"
             aria-label={`Add a task on ${label}`}
-            className="rounded p-0.5 text-gray-400 opacity-0 hover:bg-gray-200 focus:opacity-100 group-hover:opacity-100"
+            className="rounded p-0.5 text-gray-500 opacity-0 hover:bg-gray-200 focus:opacity-100 group-hover:opacity-100"
             onClick={() => setAdding(true)}
           >
             <PlusIcon className="h-3 w-3" />
@@ -90,7 +90,7 @@ function DayCell({
           <input
             autoFocus
             aria-label="New task name"
-            className="w-full rounded border border-blue-500 px-1 py-0.5 text-xs focus:outline-none"
+            className="w-full rounded border border-primary-500 px-1 py-0.5 text-xs focus:outline-none"
             onBlur={(e) => {
               const v = e.currentTarget.value.trim();
               if (v) onAdd(v, key);

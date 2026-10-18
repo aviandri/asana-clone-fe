@@ -1,8 +1,9 @@
 # E2E smoke tests (Playwright)
 
-Seven specs covering the golden path: login/logout, create project, add task (list view), move a
+Nine specs covering the golden path: login/logout, create project, add task (list view), move a
 task across board columns (drag and drop), comment on a task, and for v1.1 create an aligned goal
-and update a key result, then open the project Dashboard and export CSV.
+and update a key result, then open the project Dashboard and export CSV. For v1.2: switch
+workspace (menu, rail, shortcuts, deep link) and the guest experience.
 Chromium only, `workers: 1`, `reducedMotion: 'reduce'` (the UI animates; this keeps assertions and
 drag-and-drop from racing transitions).
 
@@ -47,7 +48,13 @@ The tests use accessible roles and names, not CSS classes or test ids. The UI mu
 | **v1.1** Project dashboard | tab | link `Dashboard` in `<nav aria-label="Project views">` → `/projects/:id/dashboard` |
 | | KPI tiles | each tile `role="group"` named exactly `Total tasks` / `Completed` / `Overdue` (more allowed), containing the number |
 | | export | link or button `Export CSV` that triggers a file download |
+| **v1.2** Workspace switcher | trigger | button named exactly `Workspace menu` inside `<nav aria-label="Main">`, its text showing the current workspace name |
+| | menu | `role="menu"`; each workspace a `menuitemradio` named by workspace name, `aria-checked="true"` on the current one; `menuitem` `Create workspace` |
+| | toast | `role="status"` containing `Switched to <name>` (also after a deep-link switch) |
+| Workspace rail | rail | `<nav aria-label="Workspaces">` (only with ≥ 2 workspaces); a button per workspace named by its name, `aria-current="true"` on the current one; `Ctrl/⌘+n` = n-th tile in `Me.workspaces` order |
+| Guest | sidebar | text `Guest` (exact) and `You're a guest in <name>` inside Main nav; no `Goals` link, no `Browse` (teams) link, no `New project` button; `/reporting` has no `Workload` link |
 
-Everything up to the v1.1 rows is implemented on FE `main`. The v1.1 rows (specs 06–07) are
-the contract for the Goals and Dashboard screens being built now. If the UI ends up differing, update the spec
+Everything up to the v1.1 rows is implemented on FE `main`. The v1.2 rows (specs 08–09) are the
+proposed contract for the workspace screens (SPEC §12), which aren't built yet; they need the full
+seed (`Mekari` + `Acme Pilot` + `guest@partner.test`). If the UI ends up differing, update the spec
 selectors in the same PR.

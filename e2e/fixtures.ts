@@ -2,12 +2,19 @@ import { test as base, expect, type APIRequestContext, type Page } from '@playwr
 
 /** Seed users from docs/SPEC.md §7. */
 export const ADMIN = { email: 'admin@example.com', password: 'password123' };
+/** SPEC §12 seed: alice is MEMBER of "Mekari" and ADMIN of "Acme Pilot"; the guest is only in Acme Pilot. */
+export const ALICE = { email: 'alice@example.com', password: 'password123' };
+export const GUEST = { email: 'guest@partner.test', password: 'password123' };
+export const MEKARI = 'Mekari';
+export const ACME = 'Acme Pilot';
 
 type Section = { id: string; name: string; position: number };
 type ProjectDetail = { id: string; name: string; sections: Section[] };
 type Task = { id: string; title: string; sectionId: string | null };
 type Story = { kind: string; body?: string };
 type KeyResult = { id: string; title: string; currentValue: number; progress: number };
+type Workspace = { id: string; name: string; myRole: 'ADMIN' | 'MEMBER' | 'GUEST' };
+type Me = { id: string; currentWorkspace: Workspace | null; workspaces: Workspace[] };
 type GoalDetail = {
   id: string;
   title: string;
@@ -91,6 +98,29 @@ export class Api {
 
   async deleteGoal(id: string) {
     await this.request.delete(`/api/v1/goals/${id}`);
+  }
+
+  // ---- Workspaces (SPEC §12) ----
+
+  async me(): Promise<Me> {
+    return this.json(await this.request.get('/api/v1/auth/me'));
+  }
+
+  async workspaceByName(name: string): Promise<Workspace> {
+    const ws = (await this.me()).workspaces.find((w) => w.name === name);
+    expect(ws, `seed workspace "${name}" should exist for this user`).toBeTruthy();
+    return ws!;
+  }
+
+  /** Sets the server-side current workspace (User.lastWorkspaceId), e.g. to restore it after a test. */
+  async switchWorkspace(id: string) {
+    await this.json(await this.request.post(`/api/v1/workspaces/${id}/switch`));
+  }
+
+  /** Projects of a given workspace, regardless of the current one. */
+  async projectsIn(workspaceId: string): Promise<{ id: string; name: string }[]> {
+    const res = await this.request.get('/api/v1/projects', { headers: { 'X-Workspace-Id': workspaceId } });
+    return (await this.json<{ data: { id: string; name: string }[] }>(res)).data;
   }
 }
 

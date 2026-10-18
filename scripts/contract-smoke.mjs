@@ -579,7 +579,8 @@ function parseCsv(text) {
 }
 
 // =====================================================================================
-// v1.2 §12 Workspaces (owned by platform/QA, asana-clone-a0). Needs the full seed (SPEC §12):
+// v1.2 §12 Workspaces (owned by platform/QA). Covers the agreed clarifications W1–W4 and W7; W5
+// (organization conversion needs a second free domain) and W6 are covered by BE tests. Needs the full seed (SPEC §12):
 // "Mekari" (organization, domain example.com; admin, alice, bob) and "Acme Pilot" (alice ADMIN,
 // bob MEMBER, GUEST_EMAIL a GUEST on project "Pilot Rollout" only). bob creates a "[fe-smoke]"
 // workspace that is deleted in `finally`; one invited "joiner" user per run is left with no
@@ -634,7 +635,7 @@ async function contractV12Workspaces({ aliceUser, bobUser }) {
     // ---- X-Workspace-Id scoping (bob's current = Mekari, header = smoke workspace) ----
     const team = expect('POST /teams with X-Workspace-Id', await bob('POST', '/teams', { name: `${PREFIX} ws team` }, ws(smokeWsId)), 201, W(TeamDetail));
     same('team created in the header workspace', team?.workspaceId, smokeWsId);
-    const proj = expect('POST /projects with X-Workspace-Id', await bob('POST', '/projects', { teamId: team.id, name: `${PREFIX} ws project` }, ws(smokeWsId)), 201, W(ProjectDetail));
+    const proj = expect('POST /projects with X-Workspace-Id', await bob('POST', '/projects', { teamId: team.id, name: `${PREFIX} ws project`, privacy: 'PUBLIC' }, ws(smokeWsId)), 201, W(ProjectDetail));
     const secret = `${PREFIX} isolated ${stamp}`;
     const task = expect('POST /tasks into that project (no header)', await bob('POST', '/tasks', { title: secret, projectId: proj.id }), 201, W(TaskDetail));
     same('project and task get the workspace of their team/project', [proj?.workspaceId, task?.workspaceId], [smokeWsId, smokeWsId]);
@@ -693,6 +694,14 @@ async function contractV12Workspaces({ aliceUser, bobUser }) {
     same("deactivation removes them from the workspace's teams", teamAfter.body?.members?.some((m) => m.id === aliceUser.id), false);
     expect('deactivated member → ID-addressed 404', await alice('GET', `/projects/${proj.id}`), 404, ErrorBody);
     expect('PATCH /admin/users/:id isActive=true', await bob('PATCH', `/admin/users/${aliceUser.id}`, { isActive: true }, ws(smokeWsId)), 200, WsUser);
+    // W4 + W7: becoming a GUEST drops team memberships, keeps project memberships, OWNER → EDITOR.
+    expect('W4 re-add alice to the team', await bob('POST', `/teams/${team.id}/members`, { userId: aliceUser.id }), 200, W(TeamDetail));
+    expect('W7 make alice a project OWNER (as a member)', await bob('POST', `/projects/${proj.id}/members`, { userId: aliceUser.id, role: 'OWNER' }), 200, W(ProjectDetail));
+    expect('W4 PATCH /admin/users/:id role GUEST', await bob('PATCH', `/admin/users/${aliceUser.id}`, { role: 'GUEST' }, ws(smokeWsId)), 200, WsUser);
+    same('W4 becoming a GUEST removes their team memberships', (await bob('GET', `/teams/${team.id}`)).body?.members?.some((m) => m.id === aliceUser.id), false);
+    const projAfter = (await bob('GET', `/projects/${proj.id}`)).body;
+    same('W4/W7 project membership stays, OWNER becomes EDITOR', projAfter?.members?.find((m) => m.user.id === aliceUser.id)?.role, 'EDITOR');
+    truthy('W7 project still has an OWNER', projAfter?.members?.some((m) => m.role === 'OWNER'), JSON.stringify(projAfter?.members?.map((m) => m.role)));
     expect('POST /workspaces/:id/leave', await alice('POST', `/workspaces/${smokeWsId}/leave`), 204);
     truthy('left workspace disappears from GET /workspaces', !ids((await alice('GET', '/workspaces')).body).includes(smokeWsId), '');
 
@@ -713,23 +722,42 @@ async function contractV12Workspaces({ aliceUser, bobUser }) {
     expect('guest GET /projects/:id/report (visible project)', await guest('GET', `/projects/${pilot?.id}/report`), 200, any);
     expect('guest GET /reports/workload → 403', await guest('GET', '/reports/workload'), 403, ErrorBody);
     const pilotTeam = (await alice('GET', '/teams', undefined, ws(acme.id))).body?.data?.find((t) => t.id === pilot?.teamId);
+    // W1: guests are never team members.
+    const gTeams = expect('W1 guest GET /teams → empty', await guest('GET', '/teams'), 200, List(any));
+    same('W1 guest team list is empty', gTeams?.data?.length, 0);
+    expect('W1 guest GET /teams/:id → 404', await guest('GET', `/teams/${pilot?.teamId}`), 404, ErrorBody);
     expect('guest POST /projects → 403', await guest('POST', '/projects', { teamId: pilot?.teamId, name: `${PREFIX} guest` }), 403, ErrorBody);
     expect('guest POST /teams → 403', await guest('POST', '/teams', { name: `${PREFIX} guest` }), 403, ErrorBody);
     expect('adding a guest to a team → 400', await alice('POST', `/teams/${pilotTeam?.id}/members`, { userId: gme?.id }), 400, ErrorBody);
     const hidden = expect('PUBLIC project in Acme the guest is not on', await alice('POST', '/projects', { teamId: pilotTeam?.id, name: `${PREFIX} acme public`, privacy: 'PUBLIC' }, ws(acme.id)), 201, W(ProjectDetail));
     acmeHiddenProjectId = hidden?.id;
     expect('guest GET non-member project (even PUBLIC) → 404', await guest('GET', `/projects/${acmeHiddenProjectId}`), 404, ErrorBody);
+    // W7: guests never manage projects; making one a project OWNER is rejected.
+    const ownerAdd = expect('W7 POST /projects/:id/members guest as OWNER → 400', await alice('POST', `/projects/${acmeHiddenProjectId}/members`, { userId: gme?.id, role: 'OWNER' }), 400, ErrorBody);
+    truthy('W7 guest-OWNER 400 names the role field', errorPath(ownerAdd).includes('role'), errorPath(ownerAdd));
+    const ownerPatch = expect('W7 PATCH /projects/:id/members/:guest role OWNER → 400', await alice('PATCH', `/projects/${pilot?.id}/members/${gme?.id}`, { role: 'OWNER' }), 400, ErrorBody);
+    truthy('W7 guest-OWNER PATCH 400 names the role field', errorPath(ownerPatch).includes('role'), errorPath(ownerPatch));
+    expect('W7 guest PATCH /projects/:id (manage) → 403', await guest('PATCH', `/projects/${pilot?.id}`, { name: `${PREFIX} renamed` }), 403, ErrorBody);
     const gGoals = expect('guest GET /goals → empty', await guest('GET', '/goals'), 200, List(any));
     same('guest goal list is empty', gGoals?.data?.length, 0);
     const acmeGoal = expect('admin POST company goal in Acme', await alice('POST', '/goals', { title: `${PREFIX} acme goal`, timePeriod: period, isCompany: true }, ws(acme.id)), 201, any);
     acmeGoalId = acmeGoal?.id;
     same('goal gets the header workspace', acmeGoal?.workspaceId, acme.id);
+    const gOwnGoal = expect('W2 POST /goals with a GUEST ownerId → 400', await alice('POST', '/goals', { title: `${PREFIX} guest-owned`, timePeriod: period, ownerId: gme?.id }, ws(acme.id)), 400, ErrorBody);
+    truthy('W2 goal 400 names ownerId', errorPath(gOwnGoal).includes('ownerId'), errorPath(gOwnGoal));
+    const gOwnKr = expect('W2 POST /goals/:id/key-results with a GUEST ownerId → 400', await alice('POST', `/goals/${acmeGoalId}/key-results`, { title: `${PREFIX} kr`, metricType: 'NUMBER', targetValue: 10, ownerId: gme?.id }), 400, ErrorBody);
+    truthy('W2 key-result 400 names ownerId', errorPath(gOwnKr).includes('ownerId'), errorPath(gOwnKr));
     expect('guest GET /goals/:id → 404', await guest('GET', `/goals/${acmeGoalId}`), 404, ErrorBody);
     expect('guest POST /goals → 403', await guest('POST', '/goals', { title: `${PREFIX} guest goal`, timePeriod: period }), 403, ErrorBody);
     const pilotDetail = (await alice('GET', `/projects/${pilot?.id}`)).body;
     const shared = new Set(pilotDetail?.members?.map((m) => m.user.id));
     const gUsers = expect('guest GET /users', await guest('GET', '/users'), 200, List(UserSummary));
     truthy('guest /users lists only people sharing a project', gUsers?.data?.length > 0 && gUsers.data.every((u) => shared.has(u.id)), `users=${gUsers?.data?.map((u) => u.email).join(',')}`);
+    // W7: guests only find people who share a project with them by id.
+    const coMember = [...shared].find((id) => id !== gme?.id);
+    expect('W7 guest GET /users/:id of a co-member → 200', await guest('GET', `/users/${coMember}`), 200, UserSummary);
+    const adminId = (await admin('GET', '/auth/me')).body?.id;
+    expect('W7 guest GET /users/:id of a non-co-member → 404', await guest('GET', `/users/${adminId}`), 404, ErrorBody);
     expect('guest GET /admin/users → 403', await guest('GET', '/admin/users'), 403, ErrorBody);
     expect('guest PATCH /workspaces/:id → 403', await guest('PATCH', `/workspaces/${acme.id}`, { name: 'nope' }), 403, ErrorBody);
 
@@ -745,6 +773,11 @@ async function contractV12Workspaces({ aliceUser, bobUser }) {
     const joined = expect('POST /workspaces/:id/join', await joiner('POST', `/workspaces/${mekari.id}/join`), 201, Workspace);
     same('joined as MEMBER', joined?.myRole, 'MEMBER');
     truthy('joined org leaves joinable', !ids((await joiner('GET', '/workspaces/joinable')).body).includes(mekari.id), '');
+    // W3: a member an admin deactivated can't rejoin through the domain.
+    expect('W3 admin deactivates the joiner in Mekari', await admin('PATCH', `/admin/users/${jMe?.id}`, { isActive: false }, ws(mekari.id)), 200, WsUser);
+    truthy('W3 joinable excludes an org where I was deactivated', !ids((await joiner('GET', '/workspaces/joinable')).body).includes(mekari.id), '');
+    expect('W3 deactivated member POST /workspaces/:id/join → 403', await joiner('POST', `/workspaces/${mekari.id}/join`), 403, ErrorBody);
+    expect('W3 admin re-activates the joiner', await admin('PATCH', `/admin/users/${jMe?.id}`, { isActive: true }, ws(mekari.id)), 200, WsUser);
     expect('joiner leaves the smoke workspace', await joiner('POST', `/workspaces/${smokeWsId}/leave`), 204);
     expect('joiner leaves Mekari', await joiner('POST', `/workspaces/${mekari.id}/leave`), 204);
     same('no workspace → Me.currentWorkspace null', (await joiner('GET', '/auth/me')).body?.currentWorkspace, null);

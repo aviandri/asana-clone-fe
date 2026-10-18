@@ -17,7 +17,7 @@ import { AssigneeField, CompleteToggle, DueDateField, PrioritySelect, UserPicker
 import { useCreateTask, useDeleteTask, useFollowTask, useUpdateTask } from './useTaskMutations';
 import { useTaskPanel } from './useTaskPanel';
 import { useToggleComplete } from './useToggleComplete';
-import { useFollowWorkspace } from '@/workspace/useWorkspace';
+import { useFollowWorkspace, useSwitchWorkspace } from '@/workspace/useWorkspace';
 
 function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -255,7 +255,8 @@ export function TaskPanel({ taskId }: { taskId: string }) {
   const task = useTask(taskId);
   const project = useProject(task.data?.projectId ?? undefined);
   const update = useUpdateTask();
-  useFollowWorkspace(task.data?.workspaceId, 'task');
+  const elsewhere = useFollowWorkspace(task.data?.workspaceId, 'task');
+  const switchTo = useSwitchWorkspace();
 
   // Escape closes the panel (inputs stop propagation for their own Escape handling).
   useEffect(() => {
@@ -294,6 +295,25 @@ export function TaskPanel({ taskId }: { taskId: string }) {
       <div className="flex h-full flex-col">
         {header()}
         <p className="p-6 text-sm text-gray-600">{notFound ? 'This task doesn’t exist or you don’t have access to it.' : 'Could not load this task.'}</p>
+      </div>
+    );
+  }
+
+  // On a project/goal page from another workspace than the task's: don't fight the page.
+  if (elsewhere) {
+    return (
+      <div className="flex h-full flex-col">
+        {header()}
+        <div className="space-y-3 p-6 text-sm text-gray-600">
+          <p>This task is in another workspace, {elsewhere.name}.</p>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => void switchTo(elsewhere, { to: `/my-tasks?task=${task.data!.id}`, message: `Switched to ${elsewhere.name} to open this task` })}
+          >
+            Open in {elsewhere.name}
+          </button>
+        </div>
       </div>
     );
   }

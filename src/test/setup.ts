@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
+import { resetFollowHistory } from '@/workspace/useWorkspace';
 import { resetWorkspaceId } from '@/workspace/workspaceId';
 
 afterEach(() => cleanup());
@@ -49,4 +50,5 @@ afterEach(() => {
     // ignore
   }
   resetWorkspaceId();
+  resetFollowHistory();
 });

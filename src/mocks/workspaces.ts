@@ -82,7 +82,7 @@ export const workspaceRoutes: [string, string, Handler][] = [
       const name = String(body?.name ?? '').trim();
       if (!name) throw fieldError('name', 'name is required');
       if (body.color !== undefined && !HEX_RE.test(String(body.color))) throw fieldError('color', 'color must be #RRGGBB');
-      const w: WorkspaceRow = { id: uid(db, 'wksp'), name, isOrganization: false, domain: null, color: body.color ?? '#651fff', createdAt: nowIso() };
+      const w: WorkspaceRow = { id: uid(db, 'wksp'), name, isOrganization: false, domain: null, color: body.color ?? '#4186e0', createdAt: nowIso() };
       db.workspaces.push(w);
       addMember(db, w, me!.id, 'ADMIN');
       me!.lastWorkspaceId = w.id;

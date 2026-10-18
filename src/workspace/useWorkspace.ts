@@ -1,6 +1,6 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { authApi, workspacesApi } from '@/api/endpoints';
 import { qk } from '@/api/queryKeys';
 import type { Me, Workspace } from '@/api/types';
@@ -28,31 +28,76 @@ type SwitchOpts = {
   alreadyCurrent?: boolean;
 };
 
-// One switch at a time per tab: a page and its task panel may both ask for the same deep-link switch.
-let inFlight: string | null = null;
+// Switches run one at a time per tab, and only the newest one commits: Ctrl+2 then Ctrl+3 in quick
+// succession must not leave the cache on one workspace and the header on another. The header and
+// cache change together, at commit, so requests in between stay consistent with what's shown.
+let seq = 0;
+let queue: Promise<void> = Promise.resolve();
+// A page and its task panel may both ask for the same deep-link switch.
+let pendingId: string | null = null;
+
+/** Make `me.currentWorkspace` this tab's workspace and drop everything cached for the old one. */
+function commit(qc: QueryClient, me: Me) {
+  setWorkspaceId(me.currentWorkspace?.id ?? null);
+  resetWorkspaceCache(qc, me);
+}
 
 export function useSwitchWorkspace() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useCallback(
-    async (ws: Pick<Workspace, 'id' | 'name'>, opts: SwitchOpts = {}) => {
-      if (inFlight === ws.id) return;
-      inFlight = ws.id;
-      try {
-        if (!opts.alreadyCurrent) await workspacesApi.switch(ws.id);
-        setWorkspaceId(ws.id);
-        const me = await authApi.me();
-        resetWorkspaceCache(qc, me);
-        if (opts.to !== false) navigate(opts.to ?? '/');
-        showToast(opts.message ?? `Switched to ${ws.name}`, 'info');
-      } catch (e) {
-        showToast(errorMessage(e));
-      } finally {
-        inFlight = null;
-      }
+    (ws: Pick<Workspace, 'id' | 'name'>, opts: SwitchOpts = {}) => {
+      if (pendingId === ws.id) return queue;
+      const mine = ++seq;
+      pendingId = ws.id;
+      const stale = () => mine !== seq;
+      const run = async () => {
+        if (stale()) return; // superseded while queued
+        try {
+          if (!opts.alreadyCurrent) await workspacesApi.switch(ws.id);
+          if (stale()) return;
+          const me = await authApi.me({ workspaceId: ws.id });
+          if (stale()) return;
+          commit(qc, me);
+          if (opts.to !== false) navigate(opts.to ?? '/');
+          showToast(opts.message ?? `Switched to ${ws.name}`, 'info');
+        } catch (e) {
+          if (!stale()) showToast(errorMessage(e));
+        } finally {
+          if (!stale()) pendingId = null;
+        }
+      };
+      queue = queue.then(run);
+      return queue;
     },
     [qc, navigate],
   );
+}
+
+let recovering = false;
+
+/**
+ * This tab's workspace answered 404 on a scoped endpoint: we were deactivated or removed there
+ * mid-session. Ask `/auth/me` without a header (the server picks another workspace, or none →
+ * onboarding), reset, and go Home. Also cancels any queued switch.
+ */
+export async function recoverLostWorkspace(qc: QueryClient, navigate: (to: string) => void) {
+  if (recovering) return;
+  recovering = true;
+  const mine = ++seq;
+  pendingId = null;
+  const lost = qc.getQueryData<Me>(qk.me)?.currentWorkspace?.name;
+  try {
+    const me = await authApi.me({ workspaceId: null });
+    if (mine !== seq) return;
+    commit(qc, me);
+    navigate('/');
+    if (lost) showToast(`You no longer have access to ${lost}`, 'info');
+  } catch (e) {
+    showToast(errorMessage(e));
+  } finally {
+    recovering = false;
+  }
 }
 
 /** Re-read `Me` (workspace list, role) after joining, leaving or editing a workspace. */
@@ -75,22 +120,39 @@ const NOUN_COPY = {
   goal: 'this goal',
 } as const;
 
+// Location keys that already auto-switched: at most one automatic switch per visit, so a URL
+// mixing workspaces can never bounce between them.
+const followed = new Set<string>();
+/** Pages whose own resource (project, goal) decides the workspace; a task panel on them doesn't. */
+const PAGE_OWNED = /^\/(projects|goals)\//;
+
 /**
  * Deep links (SPEC §12): when a loaded task / project / goal lives in another workspace the user
- * belongs to, switch there (staying on the URL) with a toast.
+ * belongs to, switch there (staying on the URL) with a toast. The page-level resource wins: a task
+ * panel on a project or goal page doesn't switch, and gets that workspace back to show instead.
  */
-export function useFollowWorkspace(workspaceId: string | undefined, noun: keyof typeof NOUN_COPY) {
+export function useFollowWorkspace(workspaceId: string | undefined, noun: keyof typeof NOUN_COPY): Workspace | undefined {
   const me = useCurrentUser();
   const switchTo = useSwitchWorkspace();
+  const location = useLocation();
   const current = me.currentWorkspace?.id;
   const target = workspaceId && workspaceId !== current ? me.workspaces.find((w) => w.id === workspaceId) : undefined;
+  const deferToPage = noun === 'task' && PAGE_OWNED.test(location.pathname);
+  const auto = target && !deferToPage && !followed.has(location.key) ? target : undefined;
   useEffect(() => {
-    if (target)
-      void switchTo(target, {
-        to: false,
-        message: `Switched to ${target.name} to open ${NOUN_COPY[noun]}`,
-      });
-  }, [target, noun, switchTo]);
+    if (!auto) return;
+    followed.add(location.key);
+    void switchTo(auto, {
+      to: false,
+      message: `Switched to ${auto.name} to open ${NOUN_COPY[noun]}`,
+    });
+  }, [auto, noun, switchTo, location.key]);
+  return target && !auto ? target : undefined;
+}
+
+/** Tests: forget auto-switch history (location keys repeat across memory routers). */
+export function resetFollowHistory() {
+  followed.clear();
 }
 
 /** Ctrl/⌘ + 1…9 switches workspaces (when there are ≥ 2). */

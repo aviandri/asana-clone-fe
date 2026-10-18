@@ -1,10 +1,15 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
+import { qk } from '@/api/queryKeys';
+import type { Task } from '@/api/types';
+import { useUpdateTask } from '@/tasks/useTaskMutations';
 import { setFetch } from '@/api/client';
 import { createMockFetch } from '@/mocks/backend';
-import { ADMIN, ALICE, renderApp, setupMockApi } from '@/test/utils';
-import { getWorkspaceId, WORKSPACE_STORAGE_KEY } from './workspaceId';
+import { ADMIN, ALICE, createTestQueryClient, renderApp, setupMockApi } from '@/test/utils';
+import { getWorkspaceId, setWorkspaceId, WORKSPACE_STORAGE_KEY } from './workspaceId';
 
 const user = () => userEvent.setup();
 const mainNav = () => screen.getByRole('navigation', { name: 'Main' });
@@ -16,13 +21,17 @@ const expectCurrent = (name: string) =>
 const expectToast = (text: string) =>
   waitFor(() => expect(screen.getAllByRole('status').map((t) => t.textContent).join('|')).toContain(text));
 
-/** Seeded mock API that also records the X-Workspace-Id of every request. */
-function recordingApi(loginAs: string) {
+type Hold = (req: { method: string; path: string; ws: string | null }) => Promise<void> | undefined;
+
+/** Seeded mock API that records the X-Workspace-Id of every request; `hold` can delay one. */
+function recordingApi(loginAs: string, hold?: Hold) {
   const db = setupMockApi(loginAs);
-  const seen: { path: string; ws: string | null }[] = [];
+  const seen: { method: string; path: string; ws: string | null }[] = [];
   const inner = createMockFetch(() => db);
-  setFetch((input, init) => {
-    seen.push({ path: new URL(input, 'http://x').pathname, ws: new Headers(init?.headers).get('X-Workspace-Id') });
+  setFetch(async (input, init) => {
+    const req = { method: init?.method ?? 'GET', path: new URL(input, 'http://x').pathname, ws: new Headers(init?.headers).get('X-Workspace-Id') };
+    seen.push(req);
+    await hold?.(req);
     return inner(input, init);
   });
   const id = (name: string) => db.workspaces.find((w) => w.name === name)!.id;
@@ -148,5 +157,129 @@ describe('onboarding (no workspace)', () => {
     await act(() => u.click(within(card).getByRole('button', { name: 'Create workspace' })));
     await expectCurrent('Side Project');
     expect(db.workspaceMembers.find((m) => m.userId === admin.id)).toMatchObject({ role: 'ADMIN', isActive: true });
+  });
+});
+
+/** A promise plus its resolver, to hold a mock response until the test says so. */
+function gate() {
+  let open!: () => void;
+  const promise = new Promise<void>((r) => (open = r));
+  return { promise, open };
+}
+
+describe('workspace switching edge cases (review fixes)', () => {
+  it('overlapping switches: only the newest commits, header and cache agree', async () => {
+    const slow = gate();
+    let acmeId = '';
+    const { db, id } = recordingApi(ALICE, ({ path, ws }) => (path === '/api/v1/auth/me' && ws === acmeId ? slow.promise : undefined));
+    acmeId = id('Acme Pilot');
+    // A third workspace for alice, so Ctrl+3 exists.
+    const alice = db.users.find((x) => x.email === ALICE)!;
+    db.workspaces.push({ id: 'wksp-zeta', name: 'Zeta Lab', isOrganization: false, domain: null, color: '#4186e0', createdAt: new Date().toISOString() });
+    db.workspaceMembers.push({ workspaceId: 'wksp-zeta', userId: alice.id, role: 'MEMBER', isActive: true, joinedAt: new Date().toISOString() });
+    renderApp('/', { db });
+    await expectCurrent('Mekari');
+
+    fireEvent.keyDown(document, { key: '1', ctrlKey: true }); // Acme Pilot: its /auth/me hangs
+    await waitFor(() => expect(alice.lastWorkspaceId).toBe(acmeId));
+    fireEvent.keyDown(document, { key: '3', ctrlKey: true }); // Zeta Lab, queued behind it
+    slow.open();
+
+    await expectCurrent('Zeta Lab');
+    await expectToast('Switched to Zeta Lab');
+    expect(screen.getAllByRole('status').map((t) => t.textContent).join('|')).not.toContain('Switched to Acme Pilot');
+    expect(getWorkspaceId()).toBe('wksp-zeta');
+    expect(alice.lastWorkspaceId).toBe('wksp-zeta');
+  });
+
+  it('a task panel on a project page from another workspace offers to switch instead of bouncing', async () => {
+    const { db, seen, id } = recordingApi(ALICE);
+    const mekariProject = db.projects.find((p) => p.name === 'Website Redesign')!;
+    const acmeTask = db.tasks.find((t) => t.title === 'Configure SSO')!;
+    const { router } = renderApp(`/projects/${mekariProject.id}/list?task=${acmeTask.id}`, { db });
+    const u = user();
+
+    expect(await screen.findByText('This task is in another workspace, Acme Pilot.')).toBeInTheDocument();
+    await expectCurrent('Mekari');
+    expect(seen.filter((r) => r.path.endsWith('/switch'))).toEqual([]);
+
+    await u.click(screen.getByRole('button', { name: 'Open in Acme Pilot' }));
+    await expectToast('Switched to Acme Pilot to open this task');
+    expect(await screen.findByRole('dialog', { name: 'Configure SSO' })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/my-tasks');
+    expect(getWorkspaceId()).toBe(id('Acme Pilot'));
+  });
+
+  it('the page wins over its task panel, and switches at most once', async () => {
+    const { db, seen, id } = recordingApi(ALICE);
+    db.users.find((x) => x.email === ALICE)!.lastWorkspaceId = id('Acme Pilot');
+    const mekariProject = db.projects.find((p) => p.name === 'Website Redesign')!;
+    const acmeTask = db.tasks.find((t) => t.title === 'Configure SSO')!;
+    renderApp(`/projects/${mekariProject.id}/list?task=${acmeTask.id}`, { db });
+
+    await expectToast('Switched to Mekari to open this project');
+    expect(await screen.findByText('This task is in another workspace, Acme Pilot.')).toBeInTheDocument();
+    await expectCurrent('Mekari');
+    // Give any (wrong) bounce a chance to fire.
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(seen.filter((r) => r.path.endsWith('/switch')).length).toBe(1);
+  });
+
+  it('recovers when access to the current workspace is lost mid-session', async () => {
+    const { db, id } = recordingApi(ALICE);
+    const alice = db.users.find((x) => x.email === ALICE)!;
+    alice.lastWorkspaceId = id('Acme Pilot');
+    const { queryClient, router } = renderApp('/my-tasks', { db });
+    await expectCurrent('Acme Pilot');
+
+    // An Acme admin deactivates alice there.
+    db.workspaceMembers.find((m) => m.workspaceId === id('Acme Pilot') && m.userId === alice.id)!.isActive = false;
+    await act(() => queryClient.invalidateQueries());
+
+    await expectToast('You no longer have access to Acme Pilot');
+    await expectCurrent('Mekari');
+    expect(getWorkspaceId()).toBe(id('Mekari'));
+    expect(router.state.location.pathname).toBe('/');
+    expect(screen.queryByRole('navigation', { name: 'Workspaces' })).not.toBeInTheDocument();
+  });
+
+  it('a late task-update failure does not roll back into the next workspace', async () => {
+    const fail = gate();
+    const db = setupMockApi(ALICE);
+    const inner = createMockFetch(() => db);
+    setFetch(async (input, init) => {
+      if (init?.method === 'PATCH') {
+        await fail.promise;
+        return new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'boom' } }), { status: 500 });
+      }
+      return inner(input, init);
+    });
+    const qc = createTestQueryClient();
+    const mine = { id: 'task-a', title: 'Mekari task', completed: false } as Task;
+    qc.setQueryData(qk.myTasks, [mine]);
+    setWorkspaceId('wksp-a');
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    const { result } = renderHook(() => useUpdateTask(), { wrapper });
+
+    act(() => result.current.mutate({ id: 'task-a', patch: { completed: true }, quiet: true }));
+    await waitFor(() => expect(qc.getQueryData<Task[]>(qk.myTasks)?.[0].completed).toBe(true));
+    // Switch: the cache now belongs to workspace B.
+    setWorkspaceId('wksp-b');
+    const theirs = [{ id: 'task-b', title: 'Acme task', completed: false } as Task];
+    qc.setQueryData(qk.myTasks, theirs);
+    fail.open();
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(qc.getQueryData(qk.myTasks)).toEqual(theirs);
+  });
+
+  it('logging out forgets the workspace id', async () => {
+    const { db, id } = recordingApi(ALICE);
+    renderApp('/', { db });
+    await expectCurrent('Mekari');
+    expect(localStorage.getItem(WORKSPACE_STORAGE_KEY)).toBe(id('Mekari'));
+    await user().click(within(mainNav()).getByRole('button', { name: 'Log out' }));
+    expect(await screen.findByRole('button', { name: 'Log in' })).toBeInTheDocument();
+    expect(getWorkspaceId()).toBeNull();
+    expect(localStorage.getItem(WORKSPACE_STORAGE_KEY)).toBeNull();
   });
 });

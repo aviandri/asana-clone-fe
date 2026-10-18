@@ -26,6 +26,17 @@ export function setFetch(f: FetchLike) {
 }
 
 /** Called when any non-auth request returns 401 (session expired). */
+let onWorkspaceLost: (() => void) | null = null;
+/** Called when a workspace-scoped request 404s for this tab's workspace (access lost mid-session). */
+export function setWorkspaceLostHandler(fn: (() => void) | null) {
+  onWorkspaceLost = fn;
+}
+
+// SPEC §12 "Scoped" endpoints. A 404 from these with a header means the header's workspace is gone
+// for us; ID-addressed endpoints 404 for their own resource instead.
+const SCOPED = [/^\/users$/, /^\/admin\//, /^\/teams$/, /^\/projects$/, /^\/me\/tasks$/, /^\/tasks$/, /^\/notifications(\/read-all)?$/, /^\/search$/, /^\/goals(\/time-periods)?$/, /^\/reports\//];
+const isScoped = (path: string) => SCOPED.some((re) => re.test(path.split('?')[0]));
+
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn;
 }
@@ -85,6 +96,8 @@ export async function request<T>(method: string, path: string, opts: RequestOpts
   if (!res.ok) {
     const err = (json as ErrorBody | undefined)?.error;
     if (res.status === 401 && !path.startsWith('/auth/')) onUnauthorized?.();
+    // Only for the tab's own workspace: an explicit per-call workspace (rail unread probes) doesn't count.
+    if (res.status === 404 && opts.workspaceId === undefined && headers[WORKSPACE_HEADER] && isScoped(path)) onWorkspaceLost?.();
     throw new ApiError(
       res.status,
       err?.code ?? (res.status === 401 ? 'UNAUTHORIZED' : 'INTERNAL'),

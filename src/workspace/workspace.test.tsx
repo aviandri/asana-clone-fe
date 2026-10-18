@@ -7,6 +7,8 @@ import { qk } from '@/api/queryKeys';
 import type { Task } from '@/api/types';
 import { useUpdateTask } from '@/tasks/useTaskMutations';
 import { setFetch } from '@/api/client';
+import { adminApi } from '@/api/endpoints';
+import { subscribeToasts } from '@/lib/toast';
 import { createMockFetch } from '@/mocks/backend';
 import { ADMIN, ALICE, createTestQueryClient, renderApp, setupMockApi } from '@/test/utils';
 import { getWorkspaceId, setWorkspaceId, WORKSPACE_STORAGE_KEY } from './workspaceId';
@@ -241,6 +243,53 @@ describe('workspace switching edge cases (review fixes)', () => {
     expect(getWorkspaceId()).toBe(id('Mekari'));
     expect(router.state.location.pathname).toBe('/');
     expect(screen.queryByRole('navigation', { name: 'Workspaces' })).not.toBeInTheDocument();
+  });
+
+  it('an ID-addressed 404 (e.g. /admin/users/:id) is not treated as lost access', async () => {
+    const { db, seen, id } = recordingApi(ALICE);
+    db.users.find((x) => x.email === ALICE)!.lastWorkspaceId = id('Acme Pilot');
+    const { router } = renderApp('/my-tasks', { db });
+    await expectCurrent('Acme Pilot');
+    const meCalls = () => seen.filter((r) => r.path === '/api/v1/auth/me').length;
+    const before = meCalls();
+
+    await act(() => adminApi.updateUser('user-missing', { role: 'MEMBER' }).catch(() => undefined));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(meCalls()).toBe(before);
+    expect(router.state.location.pathname).toBe('/my-tasks');
+  });
+
+  it('a scoped 404 while still a member is a no-op: no navigation, no toast', async () => {
+    const { db, seen, id } = recordingApi(ALICE);
+    db.users.find((x) => x.email === ALICE)!.lastWorkspaceId = id('Acme Pilot');
+    const inner = createMockFetch(() => db);
+    let flaky = false;
+    setFetch(async (input, init) => {
+      const path = new URL(input, 'http://x').pathname;
+      seen.push({ method: init?.method ?? 'GET', path, ws: new Headers(init?.headers).get('X-Workspace-Id') });
+      if (flaky && path === '/api/v1/projects') {
+        flaky = false;
+        return new Response(JSON.stringify({ error: { code: 'NOT_FOUND', message: 'Not found' } }), { status: 404 });
+      }
+      return inner(input, init);
+    });
+    const { queryClient, router } = renderApp('/my-tasks', { db });
+    await expectCurrent('Acme Pilot');
+    const meCalls = () => seen.filter((r) => r.path === '/api/v1/auth/me').length;
+    const before = meCalls();
+
+    const toasts: string[] = [];
+    const unsubscribe = subscribeToasts((list) => list.forEach((t) => toasts.push(t.message)));
+    toasts.length = 0; // subscribing replays the current ones
+    flaky = true;
+    await act(() => queryClient.invalidateQueries({ queryKey: ['projects'] }));
+    await waitFor(() => expect(meCalls()).toBe(before + 1)); // it did check
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(router.state.location.pathname).toBe('/my-tasks');
+    await expectCurrent('Acme Pilot');
+    expect(getWorkspaceId()).toBe(id('Acme Pilot'));
+    unsubscribe();
+    expect(toasts.filter((m) => m.includes('no longer have access'))).toEqual([]);
   });
 
   it('a late task-update failure does not roll back into the next workspace', async () => {

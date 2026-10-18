@@ -79,20 +79,23 @@ let recovering = false;
 /**
  * This tab's workspace answered 404 on a scoped endpoint: we were deactivated or removed there
  * mid-session. Ask `/auth/me` without a header (the server picks another workspace, or none →
- * onboarding), reset, and go Home. Also cancels any queued switch.
+ * onboarding), reset, and go Home, cancelling any queued switch. If the server still puts us in
+ * the same workspace, the 404 was about something else: do nothing at all.
  */
 export async function recoverLostWorkspace(qc: QueryClient, navigate: (to: string) => void) {
   if (recovering) return;
   recovering = true;
-  const mine = ++seq;
-  pendingId = null;
-  const lost = qc.getQueryData<Me>(qk.me)?.currentWorkspace?.name;
+  const before = seq;
+  const lost = qc.getQueryData<Me>(qk.me)?.currentWorkspace;
   try {
     const me = await authApi.me({ workspaceId: null });
-    if (mine !== seq) return;
+    if (seq !== before) return; // a switch started meanwhile: it decides
+    if (lost && me.currentWorkspace?.id === lost.id) return; // false alarm
+    seq++;
+    pendingId = null;
     commit(qc, me);
     navigate('/');
-    if (lost) showToast(`You no longer have access to ${lost}`, 'info');
+    if (lost) showToast(`You no longer have access to ${lost.name}`, 'info');
   } catch (e) {
     showToast(errorMessage(e));
   } finally {

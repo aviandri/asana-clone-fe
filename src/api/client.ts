@@ -32,9 +32,10 @@ export function setWorkspaceLostHandler(fn: (() => void) | null) {
   onWorkspaceLost = fn;
 }
 
-// SPEC §12 "Scoped" endpoints. A 404 from these with a header means the header's workspace is gone
-// for us; ID-addressed endpoints 404 for their own resource instead.
-const SCOPED = [/^\/users$/, /^\/admin\//, /^\/teams$/, /^\/projects$/, /^\/me\/tasks$/, /^\/tasks$/, /^\/notifications(\/read-all)?$/, /^\/search$/, /^\/goals(\/time-periods)?$/, /^\/reports\//];
+// SPEC §12 "Scoped" endpoints: collection paths only. A 404 from these with a header means the
+// header's workspace is gone for us; ID-addressed endpoints (/admin/users/:id, /admin/invites/:id,
+// …) 404 for their own resource instead.
+const SCOPED = [/^\/users$/, /^\/admin\/(users|invites)$/, /^\/teams$/, /^\/projects$/, /^\/me\/tasks$/, /^\/tasks$/, /^\/notifications(\/read-all)?$/, /^\/search$/, /^\/goals(\/time-periods)?$/, /^\/reports\/(overview|workload)$/];
 const isScoped = (path: string) => SCOPED.some((re) => re.test(path.split('?')[0]));
 
 export function setUnauthorizedHandler(fn: (() => void) | null) {

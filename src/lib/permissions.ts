@@ -6,7 +6,8 @@ export function canEditProjectContent(project: Pick<Project, 'myRole'> | null | 
   return project?.myRole !== 'COMMENTER';
 }
 
-/** SPEC §4: project settings are for the project OWNER or an ADMIN. */
+/** SPEC §4: project settings are for the project OWNER or an ADMIN. Never for guests (§12 W7). */
 export function canManageProject(project: Pick<Project, 'myRole'> | null | undefined, user: Pick<User, 'role'>) {
+  if (user.role === 'GUEST') return false;
   return user.role === 'ADMIN' || project?.myRole === 'OWNER';
 }

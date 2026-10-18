@@ -153,3 +153,67 @@ describe('workspaces (mock, SPEC §12)', () => {
     expect(call(db, 'DELETE', `/workspaces/${id}`, { confirmName: 'Side project' }).status).toBe(204);
   });
 });
+
+describe('workspace clarifications W1–W8 (mock)', () => {
+  const GUEST = 'guest@partner.test';
+  const id = (db: MockDb, email: string) => db.users.find((u) => u.email === email)!.id;
+  const err = (res: { body?: unknown }) => (res.body as { error: { code: string; details?: { path: string[] }[] } }).error;
+
+  it('W1: guests get no teams and 404 on a team', () => {
+    const db = createSeedDb();
+    as(db, GUEST);
+    const acme = wsId(db, 'Acme Pilot');
+    expect(call(db, 'GET', '/teams', undefined, acme).body).toEqual({ data: [] });
+    const team = db.teams.find((t) => t.workspaceId === acme)!;
+    expect(call(db, 'GET', `/teams/${team.id}`, undefined, acme).status).toBe(404);
+  });
+
+  it('W2: a guest cannot own a goal', () => {
+    const db = createSeedDb();
+    as(db, 'alice@example.com');
+    const acme = wsId(db, 'Acme Pilot');
+    const res = call(db, 'POST', '/goals', { title: 'Pilot NPS', timePeriod: '2026-Q4', isCompany: true, ownerId: id(db, GUEST) }, acme);
+    expect(res.status).toBe(400);
+    expect(err(res).details?.[0].path).toEqual(['ownerId']);
+  });
+
+  it('W3: a deactivated member cannot rejoin the org through its domain', () => {
+    const db = createSeedDb();
+    const mekari = wsId(db, 'Mekari');
+    db.workspaceMembers.find((m) => m.workspaceId === mekari && m.userId === id(db, 'bob@example.com'))!.isActive = false;
+    as(db, 'bob@example.com');
+    expect(names(call(db, 'GET', '/workspaces/joinable'))).toEqual([]);
+    expect(call(db, 'POST', `/workspaces/${mekari}/join`).status).toBe(403);
+  });
+
+  it('W6: accepting an invite while already a member keeps the role', () => {
+    const db = createSeedDb();
+    const acme = wsId(db, 'Acme Pilot');
+    db.invites.push({ id: 'inv-b', workspaceId: acme, email: 'bob@example.com', role: 'GUEST', token: 't', invitedById: id(db, 'alice@example.com'), expiresAt: new Date(Date.now() + 864e5).toISOString(), acceptedAt: null, createdAt: new Date().toISOString() });
+    as(db, 'bob@example.com');
+    expect(call(db, 'POST', '/me/invites/inv-b/accept').status).toBe(200);
+    expect(db.workspaceMembers.find((m) => m.workspaceId === acme && m.userId === id(db, 'bob@example.com'))!.role).toBe('MEMBER');
+    expect((call(db, 'GET', '/me/invites').body as { data: unknown[] }).data).toEqual([]);
+  });
+
+  it('W7: a guest cannot be made project OWNER, and finds only co-members by id', () => {
+    const db = createSeedDb();
+    const acme = wsId(db, 'Acme Pilot');
+    const rollout = db.projects.find((p) => p.name === 'Pilot Rollout')!;
+    as(db, 'alice@example.com');
+    const res = call(db, 'PATCH', `/projects/${rollout.id}/members/${id(db, GUEST)}`, { role: 'OWNER' }, acme);
+    expect(res.status).toBe(400);
+    expect(err(res).details?.[0].path).toEqual(['role']);
+
+    as(db, GUEST);
+    expect(call(db, 'GET', `/users/${id(db, 'bob@example.com')}`, undefined, acme).status).toBe(200); // on Pilot Rollout
+    expect(call(db, 'GET', `/users/${id(db, 'carol@example.com')}`, undefined, acme).status).toBe(404);
+  });
+
+  it('W8: /users items carry the role in the current workspace', () => {
+    const db = createSeedDb();
+    as(db, 'alice@example.com');
+    const users = (call(db, 'GET', '/users', undefined, wsId(db, 'Acme Pilot')).body as { data: { email: string; role: string }[] }).data;
+    expect(Object.fromEntries(users.map((u) => [u.email, u.role]))).toEqual({ 'alice@example.com': 'ADMIN', 'bob@example.com': 'MEMBER', [GUEST]: 'GUEST' });
+  });
+});

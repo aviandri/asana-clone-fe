@@ -305,9 +305,14 @@ function GoalsTab() {
   );
 }
 
+// Guests get project reports only: no workload (403) and no goals (SPEC §12).
+const GUEST_TABS: Tab[] = ['overview'];
+
 export default function ReportingPage() {
   const [params, setParams] = useSearchParams();
-  const tab = (TABS.find((t) => t.key === params.get('tab'))?.key ?? 'overview') as Tab;
+  const isGuest = useCurrentUser().role === 'GUEST';
+  const tabs = isGuest ? TABS.filter((t) => GUEST_TABS.includes(t.key)) : TABS;
+  const tab = (tabs.find((t) => t.key === params.get('tab'))?.key ?? 'overview') as Tab;
   const teamId = params.get('team') ?? '';
   const set = (k: string, v: string) =>
     setParams((p) => {
@@ -321,7 +326,7 @@ export default function ReportingPage() {
     <div className="flex h-full flex-col">
       <PageHeader title="Reporting" icon={<ChartIcon className="h-6 w-6 text-gray-500" />}>
         <div role="tablist" aria-label="Reports" className="flex gap-4">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.key}
               type="button"
@@ -337,7 +342,7 @@ export default function ReportingPage() {
       </PageHeader>
       <div role="tabpanel" aria-label={TABS.find((t) => t.key === tab)!.label} className="min-h-0 flex-1 overflow-y-auto bg-gray-50 p-6">
         <div className="mx-auto max-w-6xl space-y-4">
-          {tab !== 'goals' && <TeamFilter value={teamId} onChange={(v) => set('team', v)} />}
+          {tab !== 'goals' && !isGuest && <TeamFilter value={teamId} onChange={(v) => set('team', v)} />}
           {tab === 'overview' && <OverviewTab teamId={teamId} />}
           {tab === 'workload' && <WorkloadTab teamId={teamId} />}
           {tab === 'goals' && <GoalsTab />}

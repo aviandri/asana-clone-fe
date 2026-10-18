@@ -21,6 +21,8 @@ export type ActivityType =
   | 'DESCRIPTION_CHANGED';
 
 export type UserSummary = { id: string; name: string; email: string; avatarColor: string };
+/** `GET /users` items: a summary plus the person's role in the current workspace (SPEC §12 W8). */
+export type PickableUser = UserSummary & { role: WorkspaceRole };
 /** `role` is the role in the *current* workspace; for /admin/users `isActive` is the membership. */
 export type User = UserSummary & { role: Role; isActive: boolean; createdAt: string };
 

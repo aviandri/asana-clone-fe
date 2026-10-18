@@ -103,6 +103,26 @@ export async function recoverLostWorkspace(qc: QueryClient, navigate: (to: strin
   }
 }
 
+/**
+ * After leaving or deleting the current workspace: let the server pick where we land (another
+ * workspace, or none → onboarding), reset and go Home. Cancels any queued switch.
+ */
+export function useExitWorkspace() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  return useCallback(
+    async (message: string) => {
+      seq++;
+      pendingId = null;
+      const me = await authApi.me({ workspaceId: null });
+      commit(qc, me);
+      navigate('/');
+      showToast(message, 'info');
+    },
+    [qc, navigate],
+  );
+}
+
 /** Re-read `Me` (workspace list, role) after joining, leaving or editing a workspace. */
 export function useRefreshMe() {
   const qc = useQueryClient();

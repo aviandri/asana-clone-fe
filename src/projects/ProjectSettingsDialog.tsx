@@ -11,6 +11,8 @@ import { PlusIcon } from '@/components/icons';
 import { errorMessage } from '@/lib/errors';
 import { canManageProject } from '@/lib/permissions';
 import { UserPickerList } from '@/tasks/fields';
+import { GuestBadge } from '@/workspace/GuestBadge';
+import { useGuestIds } from '@/workspace/useWorkspaceRoles';
 import { useProjectMutations } from './useProjectMutations';
 
 const ROLE_LABEL: Record<ProjectRole, string> = { OWNER: 'Owner', EDITOR: 'Editor', COMMENTER: 'Commenter' };
@@ -118,6 +120,8 @@ function GeneralTab({ project, canManage, onDeleted }: { project: ProjectDetail;
 
 function MembersTab({ project, canManage }: { project: ProjectDetail; canManage: boolean }) {
   const m = useProjectMutations(project.id);
+  // Guests can never be project owners (SPEC §12 W7).
+  const guestIds = useGuestIds();
   const [adding, setAdding] = useState(false);
   const [newRole, setNewRole] = useState<ProjectRole>('EDITOR');
   const error = m.addMember.error ?? m.updateMember.error ?? m.removeMember.error;
@@ -146,7 +150,10 @@ function MembersTab({ project, canManage }: { project: ProjectDetail; canManage:
           <li key={user.id} className="flex items-center gap-3 px-3 py-2">
             <Avatar user={user} size="md" />
             <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium">{user.name}</div>
+              <div className="flex items-center gap-1.5 truncate text-sm font-medium">
+                {user.name}
+                {guestIds.has(user.id) && <GuestBadge />}
+              </div>
               <div className="truncate text-xs text-gray-500">{user.email}</div>
             </div>
             {canManage ? (
@@ -161,7 +168,9 @@ function MembersTab({ project, canManage }: { project: ProjectDetail; canManage:
                   }}
                 >
                   {(Object.keys(ROLE_LABEL) as ProjectRole[]).map((r) => (
-                    <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+                    <option key={r} value={r} disabled={r === 'OWNER' && guestIds.has(user.id)}>
+                      {ROLE_LABEL[r]}
+                    </option>
                   ))}
                 </select>
                 <button
@@ -191,6 +200,7 @@ function MembersTab({ project, canManage }: { project: ProjectDetail; canManage:
             <Popover open={adding} onClose={() => setAdding(false)} placement="top">
               <UserPickerList
                 allowNone={false}
+                noGuests={newRole === 'OWNER'}
                 excludeIds={project.members.map((x) => x.user.id)}
                 onPick={(u) => {
                   setAdding(false);

@@ -4,6 +4,7 @@ import {
   HttpError,
   activeMembers,
   assertNotLastAdmin,
+  demoteToGuest,
   onDomain,
   forbidden,
   membershipOf,
@@ -96,7 +97,8 @@ export const workspaceRoutes: [string, string, Handler][] = [
       const domain = emailDomain(me!.email);
       return {
         data: db.workspaces
-          .filter((w) => w.isOrganization && w.domain === domain && !roleIn(db, w.id, me!.id))
+          // W3: a deactivated membership doesn't make the org joinable again.
+          .filter((w) => w.isOrganization && w.domain === domain && !membershipOf(db, w.id, me!.id))
           .map((w) => ({ id: w.id, name: w.name, color: w.color, memberCount: activeMembers(db, w.id).length })),
       };
     },
@@ -130,11 +132,15 @@ export const workspaceRoutes: [string, string, Handler][] = [
         w.isOrganization = true;
         w.domain = domain;
         convertedToGuests = 0;
-        for (const m of activeMembers(db, w.id)) {
+        // W5: inactive memberships too (counted only when active), and pending invites.
+        for (const m of db.workspaceMembers.filter((x) => x.workspaceId === w.id)) {
           if (m.role !== 'GUEST' && !onDomain(userById(db, m.userId).email, domain)) {
-            m.role = 'GUEST';
-            convertedToGuests += 1;
+            if (m.isActive) convertedToGuests += 1;
+            demoteToGuest(db, m, me!.id);
           }
+        }
+        for (const i of db.invites.filter((x) => x.workspaceId === w.id && !x.acceptedAt)) {
+          if (!onDomain(i.email, domain)) i.role = 'GUEST';
         }
       }
       return { ...serializeWorkspace(db, w, me!.id), ...(convertedToGuests !== undefined && { convertedToGuests }) };
@@ -179,6 +185,7 @@ export const workspaceRoutes: [string, string, Handler][] = [
       const w = db.workspaces.find((x) => x.id === params.id);
       if (!w) throw notFound();
       if (!w.isOrganization || w.domain !== emailDomain(me!.email)) throw forbidden();
+      if (membershipOf(db, w.id, me!.id)?.isActive === false) throw forbidden(); // W3
       if (!roleIn(db, w.id, me!.id)) addMember(db, w, me!.id, 'MEMBER');
       return { status: 201, body: serializeWorkspace(db, w, me!.id) };
     },
@@ -209,7 +216,9 @@ export const workspaceRoutes: [string, string, Handler][] = [
       if (!w) throw notFound();
       inv.acceptedAt = nowIso();
       const m = membershipOf(db, w.id, me!.id);
-      if (m) {
+      if (m?.isActive) {
+        // W6: already in — keep the current role; the invite is still used up.
+      } else if (m) {
         m.role = inv.role;
         m.isActive = true;
       } else addMember(db, w, me!.id, inv.role);

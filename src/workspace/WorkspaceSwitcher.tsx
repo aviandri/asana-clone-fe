@@ -4,7 +4,9 @@ import { useCurrentUser } from '@/auth/useAuth';
 import { ChevronDownIcon } from '@/components/icons';
 import { Popover } from '@/components/Popover';
 import { CreateWorkspaceDialog } from './CreateWorkspaceDialog';
+import { LeaveWorkspaceDialog } from './LeaveWorkspaceDialog';
 import { WorkspaceMenuContent } from './WorkspaceMenu';
+import { GuestBadge } from './GuestBadge';
 import { WorkspaceTile } from './WorkspaceTile';
 
 /** Workspace tile + name at the top of the sidebar; opens the workspace menu. */
@@ -13,6 +15,7 @@ export function WorkspaceSwitcher() {
   const ws = me.currentWorkspace;
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
 
@@ -40,14 +43,16 @@ export function WorkspaceSwitcher() {
       >
         <WorkspaceTile workspace={ws} />
         <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">{ws.name}</span>
+        {ws.myRole === 'GUEST' && <GuestBadge tone="dark" />}
         <ChevronDownIcon className={clsx('h-4 w-4 shrink-0 text-sidebar-muted transition-transform', open && 'rotate-180')} />
       </button>
       <Popover open={open} onClose={close} className="w-72 max-w-[calc(100vw-2rem)] p-2 text-gray-900">
         <div ref={panel}>
-          <WorkspaceMenuContent onDone={() => setOpen(false)} onCreate={() => setCreating(true)} />
+          <WorkspaceMenuContent onDone={() => setOpen(false)} onCreate={() => setCreating(true)} onLeave={() => setLeaving(true)} />
         </div>
       </Popover>
       <CreateWorkspaceDialog open={creating} onClose={() => setCreating(false)} />
+      <LeaveWorkspaceDialog workspace={ws} open={leaving} onClose={() => setLeaving(false)} />
     </div>
   );
 }

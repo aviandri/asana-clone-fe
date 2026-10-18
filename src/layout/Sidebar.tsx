@@ -18,7 +18,7 @@ import {
   HomeIcon,
   LogoutIcon,
   PlusIcon,
-  ShieldIcon,
+  SettingsIcon,
   TargetIcon,
 } from '@/components/icons';
 
@@ -43,6 +43,17 @@ function NavItem({ to, icon, children, end }: { to: string; icon: ReactNode; chi
         </>
       )}
     </NavLink>
+  );
+}
+
+function ProjectLink({ project: p }: { project: Project }) {
+  return (
+    <li>
+      <NavLink to={`/projects/${p.id}`} className={({ isActive }) => clsx(itemBase, 'gap-2 py-1', itemState(isActive))}>
+        <span className="h-2.5 w-2.5 shrink-0 rounded-sm ring-1 ring-white/20" style={{ backgroundColor: p.color }} />
+        <span className="truncate">{p.name}</span>
+      </NavLink>
+    </li>
   );
 }
 
@@ -71,12 +82,7 @@ function TeamGroup({ team, projects }: { team: Pick<Team, 'id' | 'name'>; projec
         <ul className="ml-3 space-y-0.5">
           {projects.length === 0 && <li className="px-3 py-1 text-xs text-sidebar-muted">No projects yet</li>}
           {projects.map((p) => (
-            <li key={p.id}>
-              <NavLink to={`/projects/${p.id}`} className={({ isActive }) => clsx(itemBase, 'gap-2 py-1', itemState(isActive))}>
-                <span className="h-2.5 w-2.5 shrink-0 rounded-sm ring-1 ring-white/20" style={{ backgroundColor: p.color }} />
-                <span className="truncate">{p.name}</span>
-              </NavLink>
-            </li>
+            <ProjectLink key={p.id} project={p} />
           ))}
         </ul>
       )}
@@ -112,6 +118,8 @@ function UnreadBadge({ count }: { count: number | undefined }) {
 
 export function Sidebar() {
   const user = useCurrentUser();
+  // Guests (SPEC §12) see only their projects: no teams, goals or project creation.
+  const isGuest = user.role === 'GUEST';
   const { logout } = useAuth();
   const teams = useTeams();
   const projects = useProjects();
@@ -149,40 +157,59 @@ export function Sidebar() {
             <UnreadBadge count={unread} />
           </span>
         </NavItem>
-        <NavItem to="/goals" icon={<TargetIcon />}>
-          Goals
-        </NavItem>
+        {!isGuest && (
+          <NavItem to="/goals" icon={<TargetIcon />}>
+            Goals
+          </NavItem>
+        )}
         <NavItem to="/reporting" icon={<ChartIcon />}>
           Reporting
         </NavItem>
         {user.role === 'ADMIN' && (
-          <NavItem to="/admin" icon={<ShieldIcon />}>
-            Admin
+          <NavItem to="/workspace/settings" icon={<SettingsIcon />}>
+            Workspace settings
           </NavItem>
         )}
       </div>
 
       <div className="mt-6 min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <div className="mb-1 flex items-center gap-2 px-3 text-xs font-semibold uppercase tracking-wide text-sidebar-muted">
-          <span className="flex-1">Teams</span>
-          <Link to="/teams" className={clsx('rounded normal-case tracking-normal hover:text-white', focusRing)}>
-            Browse
-          </Link>
-          <button
-            type="button"
-            aria-label="New project"
-            title="New project"
-            className={clsx('rounded p-0.5 hover:bg-sidebar-hover hover:text-white', focusRing)}
-            onClick={() => setNewProject(true)}
-          >
-            <PlusIcon className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div className="space-y-1">
-          {groups.map((g) => (
-            <TeamGroup key={g.team.id} team={g.team} projects={g.projects} />
-          ))}
-        </div>
+        {isGuest ? (
+          <>
+            <div className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-sidebar-muted">Projects</div>
+            <ul className="space-y-0.5">
+              {(projects.data ?? []).map((p) => (
+                <ProjectLink key={p.id} project={p} />
+              ))}
+              {projects.data?.length === 0 && <li className="px-3 py-1 text-xs text-sidebar-muted">No projects shared with you yet</li>}
+            </ul>
+            <p className="mx-1 mt-4 rounded-md bg-white/5 px-3 py-2 text-xs leading-relaxed text-sidebar-muted">
+              {`You're a guest in ${user.currentWorkspace?.name}.`} You can see the projects you’ve been added to.
+            </p>
+          </>
+        ) : (
+          <>
+            <div className="mb-1 flex items-center gap-2 px-3 text-xs font-semibold uppercase tracking-wide text-sidebar-muted">
+              <span className="flex-1">Teams</span>
+              <Link to="/teams" className={clsx('rounded normal-case tracking-normal hover:text-white', focusRing)}>
+                Browse
+              </Link>
+              <button
+                type="button"
+                aria-label="New project"
+                title="New project"
+                className={clsx('rounded p-0.5 hover:bg-sidebar-hover hover:text-white', focusRing)}
+                onClick={() => setNewProject(true)}
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="space-y-1">
+              {groups.map((g) => (
+                <TeamGroup key={g.team.id} team={g.team} projects={g.projects} />
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="flex items-center gap-2 border-t border-white/10 px-3 py-3">

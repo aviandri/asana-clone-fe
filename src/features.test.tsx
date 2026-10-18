@@ -249,7 +249,7 @@ describe('teams', () => {
 
 describe('admin', () => {
   it('changes roles and deactivates users', async () => {
-    const { db } = renderApp('/admin', { loginAs: ADMIN });
+    const { db } = renderApp('/workspace/settings?tab=members', { loginAs: ADMIN });
     const u = user();
     await u.selectOptions(await screen.findByRole('combobox', { name: 'Role for Bob Brown' }), 'ADMIN');
     await waitFor(() => expect(db.workspaceMembers.find((m) => m.userId === db.users.find((x) => x.email === BOB)!.id)!.role).toBe('ADMIN'));

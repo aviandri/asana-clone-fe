@@ -81,10 +81,10 @@ describe('app shell', () => {
     expect(within(nav).queryByText('Admin')).not.toBeInTheDocument();
   });
 
-  it('shows Admin and the unread inbox badge for admins', async () => {
+  it('shows Workspace settings and the unread inbox badge for admins', async () => {
     renderApp('/', { loginAs: ADMIN });
     const nav = await screen.findByRole('navigation', { name: 'Main' });
-    expect(within(nav).getByText('Admin')).toBeInTheDocument();
+    expect(within(nav).getByRole('link', { name: 'Workspace settings' })).toHaveAttribute('href', '/workspace/settings');
     expect(await within(nav).findByLabelText('2 unread')).toBeInTheDocument();
   });
 

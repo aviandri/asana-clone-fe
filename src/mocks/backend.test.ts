@@ -79,7 +79,12 @@ describe('mock backend', () => {
     loginAs(db, 'admin@example.com');
     const inv = call(db, 'POST', '/admin/invites', { email: 'new@example.com', role: 'MEMBER' }).body as { token: string };
     db.sessionUserId = null;
-    expect(call(db, 'GET', `/auth/invites/${inv.token}`).body).toEqual({ email: 'new@example.com', role: 'MEMBER' });
+    expect(call(db, 'GET', `/auth/invites/${inv.token}`).body).toMatchObject({
+      email: 'new@example.com',
+      role: 'MEMBER',
+      workspace: { name: 'Mekari' },
+      existingUser: false,
+    });
     const res = call(db, 'POST', '/auth/accept-invite', { token: inv.token, name: 'New Person', password: 'longenough' });
     expect(res.status).toBe(200);
     const reused = call(db, 'GET', `/auth/invites/${inv.token}`);

@@ -1,6 +1,7 @@
 // Helpers shared by the mock route modules (core routes in backend.ts, goals.ts, reports.ts).
 import type {
   ErrorCode,
+  Me,
   Project,
   ProjectDetail,
   Task,
@@ -9,8 +10,10 @@ import type {
   TeamDetail,
   User,
   UserSummary,
+  Workspace,
+  WorkspaceRole,
 } from '@/api/types';
-import { type MockDb, type ProjectRow, type TaskRow, type UserRow } from './db';
+import { type MockDb, type ProjectRow, type TaskRow, type UserRow, type WorkspaceMemberRow, type WorkspaceRow } from './db';
 
 export class HttpError extends Error {
   constructor(
@@ -35,6 +38,15 @@ export type Ctx = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   body: any;
   me: UserRow | null;
+  /** Raw X-Workspace-Id header. */
+  header: string | null;
+  /** The request's workspace (SPEC §12) for scoped endpoints: 404 for a header naming a workspace
+   *  the caller isn't an active member of, 403 NO_WORKSPACE when they have none. */
+  ws: () => WorkspaceRow;
+  /** The caller's role in `ws()`. */
+  role: () => WorkspaceRole;
+  /** Like `ws()` but lenient (bad header → fallback, none → null); for /auth/me and friends. */
+  wsOrNull: () => WorkspaceRow | null;
 };
 /** `raw` responses (e.g. CSV) bypass JSON encoding. */
 export type Result = { status: number; body?: unknown; raw?: string; contentType?: string; filename?: string };
@@ -50,7 +62,94 @@ export const summary = (u: UserRow): UserSummary => ({
   email: u.email,
   avatarColor: u.avatarColor,
 });
-export const fullUser = (u: UserRow): User => ({ ...summary(u), role: u.role, isActive: u.isActive, createdAt: u.createdAt });
+
+// ---------- workspaces (SPEC §12) ----------
+
+export const membershipOf = (db: MockDb, workspaceId: string, userId: string): WorkspaceMemberRow | undefined =>
+  db.workspaceMembers.find((m) => m.workspaceId === workspaceId && m.userId === userId);
+/** Role of an *active* member, else null. */
+export function roleIn(db: MockDb, workspaceId: string, userId: string): WorkspaceRole | null {
+  const m = membershipOf(db, workspaceId, userId);
+  return m?.isActive ? m.role : null;
+}
+export const activeMembers = (db: MockDb, workspaceId: string) =>
+  db.workspaceMembers.filter((m) => m.workspaceId === workspaceId && m.isActive);
+
+/** The workspace a request runs in. `header` = X-Workspace-Id. */
+export function resolveWorkspace(db: MockDb, me: UserRow, header: string | null, lenient = false): WorkspaceRow | null {
+  const byId = (id: string | null) => (id && roleIn(db, id, me.id) ? db.workspaces.find((w) => w.id === id) : undefined);
+  if (header) {
+    const w = byId(header);
+    if (w) return w;
+    if (!lenient) throw notFound();
+  }
+  const last = byId(me.lastWorkspaceId);
+  if (last) return last;
+  const oldest = db.workspaceMembers
+    .filter((m) => m.userId === me.id && m.isActive)
+    .sort((a, b) => a.joinedAt.localeCompare(b.joinedAt))[0];
+  const w = oldest ? db.workspaces.find((x) => x.id === oldest.workspaceId) : undefined;
+  if (w) return w;
+  if (lenient) return null;
+  throw new HttpError(403, 'FORBIDDEN', 'You are not a member of any workspace', [{ path: ['workspace'], message: 'NO_WORKSPACE' }]);
+}
+
+export function serializeWorkspace(db: MockDb, w: WorkspaceRow, userId: string): Workspace {
+  return {
+    id: w.id,
+    name: w.name,
+    isOrganization: w.isOrganization,
+    domain: w.domain,
+    color: w.color,
+    myRole: roleIn(db, w.id, userId) ?? 'MEMBER',
+    memberCount: activeMembers(db, w.id).length,
+    createdAt: w.createdAt,
+  };
+}
+export const myWorkspaces = (db: MockDb, userId: string) =>
+  db.workspaces
+    .filter((w) => roleIn(db, w.id, userId))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((w) => serializeWorkspace(db, w, userId));
+
+/** `role` = role in `ws` (the current workspace); a user without one reads as MEMBER. */
+export const fullUser = (db: MockDb, u: UserRow, ws: WorkspaceRow | null): User => ({
+  ...summary(u),
+  role: (ws && membershipOf(db, ws.id, u.id)?.role) || 'MEMBER',
+  isActive: u.isActive,
+  createdAt: u.createdAt,
+});
+/** /admin/users: the membership's role and active flag. */
+export const memberUser = (u: UserRow, m: WorkspaceMemberRow): User => ({
+  ...summary(u),
+  role: m.role,
+  isActive: m.isActive,
+  createdAt: u.createdAt,
+});
+export const serializeMe = (db: MockDb, u: UserRow, ws: WorkspaceRow | null): Me => ({
+  ...fullUser(db, u, ws),
+  isActive: true,
+  currentWorkspace: ws ? serializeWorkspace(db, ws, u.id) : null,
+  workspaces: myWorkspaces(db, u.id),
+});
+
+export const onDomain = (email: string, domain: string | null) => !!domain && email.toLowerCase().endsWith(`@${domain}`);
+
+export function assertNotLastAdmin(db: MockDb, workspaceId: string) {
+  if (activeMembers(db, workspaceId).filter((m) => m.role === 'ADMIN').length <= 1)
+    throw new HttpError(409, 'CONFLICT', 'A workspace must keep at least one admin');
+}
+
+/** 400 VALIDATION on `field` unless `userId` is an active member of the workspace (no cross-workspace refs). */
+export function assertWorkspaceMember(db: MockDb, workspaceId: string, userId: string, field: string, opts: { noGuests?: boolean } = {}) {
+  const role = roleIn(db, workspaceId, userId);
+  const user = db.users.find((u) => u.id === userId);
+  let message: string | null = null;
+  if (!user || !role) message = `${user?.name ?? 'That person'} isn’t a member of this workspace`;
+  else if (opts.noGuests && role === 'GUEST') message = 'Guests can’t join teams';
+  if (message) throw new HttpError(400, 'VALIDATION', message, [{ path: [field], message }]);
+}
+
 export const userById = (db: MockDb, id: string) => {
   const u = db.users.find((x) => x.id === id);
   if (!u) throw notFound();
@@ -76,6 +175,7 @@ export function serializeProject(db: MockDb, p: ProjectRow, me: UserRow): Projec
   const membership = db.projectMembers.find((m) => m.projectId === p.id && m.userId === me.id);
   return {
     id: p.id,
+    workspaceId: p.workspaceId,
     teamId: p.teamId,
     name: p.name,
     description: p.description,
@@ -108,6 +208,7 @@ export function serializeTask(db: MockDb, t: TaskRow): Task {
   const project = t.projectId ? db.projects.find((p) => p.id === t.projectId) : null;
   return {
     id: t.id,
+    workspaceId: t.workspaceId,
     projectId: t.projectId,
     sectionId: t.sectionId,
     parentId: t.parentId,
@@ -144,11 +245,14 @@ export function serializeTaskDetail(db: MockDb, t: TaskRow): TaskDetail {
   };
 }
 
-// ---------- permissions ----------
+// ---------- permissions (role = the caller's role in the resource's own workspace) ----------
 
 export function canSeeProject(db: MockDb, p: ProjectRow, me: UserRow) {
-  if (me.role === 'ADMIN' || p.privacy === 'PUBLIC') return true;
-  if (db.projectMembers.some((m) => m.projectId === p.id && m.userId === me.id)) return true;
+  const role = roleIn(db, p.workspaceId, me.id);
+  if (!role) return false;
+  const isMember = db.projectMembers.some((m) => m.projectId === p.id && m.userId === me.id);
+  if (role === 'GUEST') return isMember; // privacy ignored for guests
+  if (role === 'ADMIN' || p.privacy === 'PUBLIC' || isMember) return true;
   if (p.privacy === 'TEAM') {
     return db.teamMembers.some((m) => m.teamId === p.teamId && m.userId === me.id);
   }
@@ -159,22 +263,30 @@ export function visibleProject(db: MockDb, id: string, me: UserRow) {
   if (!p || !canSeeProject(db, p, me)) throw notFound();
   return p;
 }
+export function visibleTeam(db: MockDb, id: string, me: UserRow) {
+  const t = db.teams.find((x) => x.id === id);
+  if (!t || !roleIn(db, t.workspaceId, me.id)) throw notFound();
+  return t;
+}
+const isWsAdmin = (db: MockDb, workspaceId: string, me: UserRow) => roleIn(db, workspaceId, me.id) === 'ADMIN';
 export function assertCanEditProjectContent(db: MockDb, p: ProjectRow, me: UserRow) {
-  if (me.role === 'ADMIN') return;
+  if (isWsAdmin(db, p.workspaceId, me)) return;
   const m = db.projectMembers.find((x) => x.projectId === p.id && x.userId === me.id);
   if (m?.role === 'COMMENTER') throw forbidden();
 }
 export function assertProjectOwner(db: MockDb, p: ProjectRow, me: UserRow) {
-  if (me.role === 'ADMIN') return;
+  if (isWsAdmin(db, p.workspaceId, me)) return;
   const m = db.projectMembers.find((x) => x.projectId === p.id && x.userId === me.id);
   if (m?.role !== 'OWNER') throw forbidden();
 }
 export function canSeeTask(db: MockDb, t: TaskRow, me: UserRow): boolean {
+  const role = roleIn(db, t.workspaceId, me.id);
+  if (!role) return false;
   if (t.projectId) {
     const p = db.projects.find((x) => x.id === t.projectId);
     return !!p && canSeeProject(db, p, me);
   }
-  if (me.role === 'ADMIN') return true;
+  if (role === 'ADMIN') return true;
   return (
     t.creatorId === me.id ||
     t.assigneeId === me.id ||
@@ -190,8 +302,9 @@ export function assertCanEditTask(db: MockDb, t: TaskRow, me: UserRow) {
   if (!t.projectId) return;
   assertCanEditProjectContent(db, db.projects.find((p) => p.id === t.projectId)!, me);
 }
-/** 400 VALIDATION when `user` couldn't see the task's project (assigning / adding followers). */
+/** 400 VALIDATION when `user` isn't in the task's workspace or couldn't see its project (assigning / adding followers). */
 export function assertCanSeeTaskProject(db: MockDb, t: TaskRow, user: UserRow, field: string) {
+  assertWorkspaceMember(db, t.workspaceId, user.id, field);
   if (!t.projectId) return;
   const p = db.projects.find((x) => x.id === t.projectId)!;
   if (!canSeeProject(db, p, user)) {
@@ -205,7 +318,29 @@ export function assertNotLastOwner(db: MockDb, projectId: string) {
   const owners = db.projectMembers.filter((m) => m.projectId === projectId && m.role === 'OWNER');
   if (owners.length <= 1) throw new HttpError(409, 'CONFLICT', 'A project must keep at least one owner');
 }
-export const requireAdmin = (me: UserRow) => {
-  if (me.role !== 'ADMIN') throw forbidden();
+export const requireAdmin = (role: WorkspaceRole | null) => {
+  if (role !== 'ADMIN') throw forbidden();
+};
+export const forbidGuest = (role: WorkspaceRole) => {
+  if (role === 'GUEST') throw forbidden();
 };
 
+/**
+ * Deactivation / leaving (SPEC §12): drop the user's team and project memberships in the
+ * workspace; a project left without an OWNER passes to `heirId` (the acting admin).
+ */
+export function removeFromWorkspace(db: MockDb, workspaceId: string, userId: string, heirId: string | null) {
+  const teamIds = new Set(db.teams.filter((t) => t.workspaceId === workspaceId).map((t) => t.id));
+  db.teamMembers = db.teamMembers.filter((m) => !(m.userId === userId && teamIds.has(m.teamId)));
+  for (const p of db.projects.filter((x) => x.workspaceId === workspaceId)) {
+    const mine = db.projectMembers.find((m) => m.projectId === p.id && m.userId === userId);
+    if (!mine) continue;
+    db.projectMembers = db.projectMembers.filter((m) => m !== mine);
+    const heir = heirId && heirId !== userId ? heirId : (activeMembers(db, workspaceId).find((m) => m.role === 'ADMIN' && m.userId !== userId)?.userId ?? null);
+    if (mine.role === 'OWNER' && heir && !db.projectMembers.some((m) => m.projectId === p.id && m.role === 'OWNER')) {
+      const existing = db.projectMembers.find((m) => m.projectId === p.id && m.userId === heir);
+      if (existing) existing.role = 'OWNER';
+      else db.projectMembers.push({ projectId: p.id, userId: heir, role: 'OWNER' });
+    }
+  }
+}

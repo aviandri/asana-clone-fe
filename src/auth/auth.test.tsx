@@ -39,6 +39,7 @@ describe('auth flow', () => {
     const db = setupMockApi();
     db.invites.push({
       id: 'inv1',
+      workspaceId: db.workspaces[0].id,
       email: 'newbie@example.com',
       role: 'MEMBER',
       token: 'tok123',

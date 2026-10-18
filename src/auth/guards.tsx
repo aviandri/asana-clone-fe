@@ -15,9 +15,17 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+/** Admin of the current workspace. */
 export function RequireAdmin({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   if (user?.role !== 'ADMIN') return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+/** No workspace yet (SPEC §12) → the onboarding screen instead of the app. */
+export function RequireWorkspace({ children, fallback }: { children: ReactNode; fallback: ReactNode }) {
+  const { user } = useAuth();
+  if (user && !user.currentWorkspace) return <>{fallback}</>;
   return <>{children}</>;
 }
 

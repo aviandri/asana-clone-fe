@@ -119,7 +119,7 @@ describe('inbox', () => {
     await user().click(within(list).getByRole('button', { name: /Alice Anderson mentioned you in Draft new homepage copy/ }));
     expect(await screen.findByRole('dialog', { name: 'Draft new homepage copy' })).toBeInTheDocument();
     expect(await within(nav).findByLabelText('1 unread')).toBeInTheDocument();
-    await waitFor(() => expect(db.notifications.filter((n) => !n.read)).toHaveLength(1));
+    await waitFor(() => expect(db.notifications.filter((n) => n.workspaceId === db.workspaces[0].id && !n.read)).toHaveLength(1));
   });
 
   it('marks all as read and filters unread', async () => {
@@ -127,7 +127,7 @@ describe('inbox', () => {
     const u = user();
     await screen.findByRole('list', { name: 'Notifications' });
     await u.click(screen.getByRole('button', { name: /mark all as read/i }));
-    await waitFor(() => expect(db.notifications.every((n) => n.read)).toBe(true));
+    await waitFor(() => expect(db.notifications.filter((n) => n.workspaceId === db.workspaces[0].id).every((n) => n.read)).toBe(true));
     await u.click(screen.getByRole('button', { name: /^unread/i }));
     expect(await screen.findByText('No unread notifications')).toBeInTheDocument();
   });
@@ -252,14 +252,15 @@ describe('admin', () => {
     const { db } = renderApp('/admin', { loginAs: ADMIN });
     const u = user();
     await u.selectOptions(await screen.findByRole('combobox', { name: 'Role for Bob Brown' }), 'ADMIN');
-    await waitFor(() => expect(db.users.find((x) => x.email === BOB)!.role).toBe('ADMIN'));
+    await waitFor(() => expect(db.workspaceMembers.find((m) => m.userId === db.users.find((x) => x.email === BOB)!.id)!.role).toBe('ADMIN'));
     expect(screen.getByRole('combobox', { name: 'Role for Ada Admin' })).toBeDisabled();
 
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     const row = screen.getByText('Bob Brown').closest('tr')!;
     await u.click(within(row).getByRole('button', { name: 'Deactivate' }));
     expect(await within(row).findByText('Deactivated')).toBeInTheDocument();
-    expect(db.users.find((x) => x.email === BOB)!.isActive).toBe(false);
+    const bob = db.users.find((x) => x.email === BOB)!;
+    expect(db.workspaceMembers.find((m) => m.userId === bob.id && m.workspaceId === db.workspaces[0].id)!.isActive).toBe(false);
   });
 
   it('creates an invite link, lists it as pending with inviter, and revokes it', async () => {
@@ -278,13 +279,13 @@ describe('admin', () => {
     await waitFor(() => expect(db.invites).toHaveLength(0));
   });
 
-  it('shows duplicate-user errors inline', async () => {
+  it('shows already-a-member errors inline', async () => {
     renderApp('/admin', { loginAs: ADMIN });
     const u = user();
     await u.click(await screen.findByRole('tab', { name: 'Invites' }));
     await u.type(screen.getByRole('textbox', { name: 'Email address' }), BOB);
     await u.click(screen.getByRole('button', { name: /create invite link/i }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/already exists/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/already a member/i);
   });
 });
 

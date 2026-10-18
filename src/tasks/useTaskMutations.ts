@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { tasksApi } from '@/api/endpoints';
 import { qk } from '@/api/queryKeys';
+import { getWorkspaceId } from '@/workspace/workspaceId';
 import type { CreateTaskInput, Task, TaskDetail, UpdateTaskInput, UserSummary } from '@/api/types';
 
 type TaskList = Task[];
@@ -54,12 +55,16 @@ export function useUpdateTask() {
       const snapshot = qc.getQueriesData({ predicate: (q) => ['projectTasks', 'myTasks', 'task'].includes(String(q.queryKey[0])) });
       const fields = optimisticFields(patch, assignee);
       patchCachedTask(qc, id, (t) => ({ ...t, ...fields }));
-      return { snapshot };
+      return { snapshot, workspaceId: getWorkspaceId() };
     },
+    // Lists like ['myTasks'] aren't keyed by workspace, and a switch resets the cache: a late
+    // result from the previous workspace must not write its data into the new one.
     onError: (_err, _vars, ctx) => {
-      ctx?.snapshot.forEach(([key, data]) => qc.setQueryData(key, data));
+      if (ctx?.workspaceId !== getWorkspaceId()) return;
+      ctx.snapshot.forEach(([key, data]) => qc.setQueryData(key, data));
     },
-    onSuccess: (task) => {
+    onSuccess: (task, _vars, ctx) => {
+      if (ctx?.workspaceId !== getWorkspaceId()) return;
       qc.setQueryData(qk.task(task.id), task);
       const { followers: _f, subtasks: _s, parent: _p, ...plain } = task;
       patchCachedTask(qc, task.id, () => plain);

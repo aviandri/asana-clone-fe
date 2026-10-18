@@ -1,3 +1,4 @@
+import { getWorkspaceId } from '@/workspace/workspaceId';
 import type { ErrorBody, ErrorCode } from './types';
 
 export const API_BASE = '/api/v1';
@@ -25,6 +26,17 @@ export function setFetch(f: FetchLike) {
 }
 
 /** Called when any non-auth request returns 401 (session expired). */
+let onWorkspaceLost: (() => void) | null = null;
+/** Called when a workspace-scoped request 404s for this tab's workspace (access lost mid-session). */
+export function setWorkspaceLostHandler(fn: (() => void) | null) {
+  onWorkspaceLost = fn;
+}
+
+// SPEC §12 "Scoped" endpoints. A 404 from these with a header means the header's workspace is gone
+// for us; ID-addressed endpoints 404 for their own resource instead.
+const SCOPED = [/^\/users$/, /^\/admin\//, /^\/teams$/, /^\/projects$/, /^\/me\/tasks$/, /^\/tasks$/, /^\/notifications(\/read-all)?$/, /^\/search$/, /^\/goals(\/time-periods)?$/, /^\/reports\//];
+const isScoped = (path: string) => SCOPED.some((re) => re.test(path.split('?')[0]));
+
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn;
 }
@@ -42,15 +54,27 @@ function buildUrl(path: string, query?: Query) {
   return qs ? `${url}?${qs}` : url;
 }
 
-export async function request<T>(
-  method: string,
-  path: string,
-  opts: { body?: unknown; query?: Query } = {},
-): Promise<T> {
-  const init: RequestInit = { method, credentials: 'include', headers: {} };
+export const WORKSPACE_HEADER = 'X-Workspace-Id';
+
+/** Headers every request carries: the tab's workspace (SPEC §12), unless overridden per call. */
+function baseHeaders(workspaceId?: string | null): Record<string, string> {
+  const ws = workspaceId === undefined ? getWorkspaceId() : workspaceId;
+  return ws ? { [WORKSPACE_HEADER]: ws } : {};
+}
+
+export type RequestOpts = {
+  body?: unknown;
+  query?: Query;
+  /** Send a different workspace than the tab's (e.g. per-workspace unread counts); null = none. */
+  workspaceId?: string | null;
+};
+
+export async function request<T>(method: string, path: string, opts: RequestOpts = {}): Promise<T> {
+  const headers = baseHeaders(opts.workspaceId);
+  const init: RequestInit = { method, credentials: 'include', headers };
   if (opts.body !== undefined) {
     init.body = JSON.stringify(opts.body);
-    (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
+    headers['Content-Type'] = 'application/json';
   }
   let res: Response;
   try {
@@ -72,6 +96,8 @@ export async function request<T>(
   if (!res.ok) {
     const err = (json as ErrorBody | undefined)?.error;
     if (res.status === 401 && !path.startsWith('/auth/')) onUnauthorized?.();
+    // Only for the tab's own workspace: an explicit per-call workspace (rail unread probes) doesn't count.
+    if (res.status === 404 && opts.workspaceId === undefined && headers[WORKSPACE_HEADER] && isScoped(path)) onWorkspaceLost?.();
     throw new ApiError(
       res.status,
       err?.code ?? (res.status === 401 ? 'UNAUTHORIZED' : 'INTERNAL'),
@@ -83,7 +109,8 @@ export async function request<T>(
 }
 
 export const http = {
-  get: <T>(path: string, query?: Query) => request<T>('GET', path, { query }),
+  get: <T>(path: string, query?: Query, opts: Pick<RequestOpts, 'workspaceId'> = {}) =>
+    request<T>('GET', path, { query, ...opts }),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, { body: body ?? {} }),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, { body }),
   delete: <T = void>(path: string) => request<T>('DELETE', path),
@@ -91,7 +118,7 @@ export const http = {
 
 /** Fetch a non-JSON resource (e.g. a CSV export) through the configured transport. */
 export async function requestBlob(path: string): Promise<{ blob: Blob; filename: string | null }> {
-  const res = await fetchImpl(`${API_BASE}${path}`, { method: 'GET', credentials: 'include' });
+  const res = await fetchImpl(`${API_BASE}${path}`, { method: 'GET', credentials: 'include', headers: baseHeaders() });
   if (!res.ok) throw new ApiError(res.status, res.status === 401 ? 'UNAUTHORIZED' : 'INTERNAL', res.statusText || 'Download failed');
   const disposition = res.headers.get('Content-Disposition') ?? '';
   const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? null;

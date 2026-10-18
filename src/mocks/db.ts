@@ -9,7 +9,7 @@ import type {
   Privacy,
   ProjectRole,
   ProjectView,
-  Role,
+  WorkspaceRole,
 } from '@/api/types';
 
 export type UserRow = {
@@ -17,25 +17,44 @@ export type UserRow = {
   email: string;
   name: string;
   password: string;
-  role: Role;
+  /** Global login switch (only the CLI/DB sets it); workspace access is WorkspaceMemberRow.isActive. */
   isActive: boolean;
   avatarColor: string;
   createdAt: string;
+  lastWorkspaceId: string | null;
+};
+export type WorkspaceRow = {
+  id: string;
+  name: string;
+  isOrganization: boolean;
+  /** lowercase, set only for organizations */
+  domain: string | null;
+  color: string;
+  createdAt: string;
+};
+export type WorkspaceMemberRow = {
+  workspaceId: string;
+  userId: string;
+  role: WorkspaceRole;
+  isActive: boolean;
+  joinedAt: string;
 };
 export type InviteRow = {
   id: string;
+  workspaceId: string;
   email: string;
-  role: Role;
+  role: WorkspaceRole;
   token: string;
   invitedById: string;
   expiresAt: string;
   acceptedAt: string | null;
   createdAt: string;
 };
-export type TeamRow = { id: string; name: string; description: string | null; createdAt: string };
+export type TeamRow = { id: string; workspaceId: string; name: string; description: string | null; createdAt: string };
 export type TeamMemberRow = { teamId: string; userId: string };
 export type ProjectRow = {
   id: string;
+  workspaceId: string;
   teamId: string;
   ownerId: string;
   name: string;
@@ -51,6 +70,7 @@ export type ProjectMemberRow = { projectId: string; userId: string; role: Projec
 export type SectionRow = { id: string; projectId: string; name: string; position: number };
 export type TaskRow = {
   id: string;
+  workspaceId: string;
   projectId: string | null;
   sectionId: string | null;
   parentId: string | null;
@@ -86,6 +106,7 @@ export type ActivityRow = {
 };
 export type NotificationRow = {
   id: string;
+  workspaceId: string;
   userId: string;
   actorId: string;
   taskId: string | null;
@@ -96,6 +117,7 @@ export type NotificationRow = {
 
 export type GoalRow = {
   id: string;
+  workspaceId: string;
   title: string;
   description: string | null;
   ownerId: string;
@@ -141,6 +163,8 @@ export type MockDb = {
   /** failed login attempts per email (mock rate limiting) */
   loginFailures?: Record<string, number>;
   seq: number;
+  workspaces: WorkspaceRow[];
+  workspaceMembers: WorkspaceMemberRow[];
   users: UserRow[];
   invites: InviteRow[];
   teams: TeamRow[];
@@ -175,6 +199,8 @@ export function createSeedDb(): MockDb {
   const db: MockDb = {
     sessionUserId: null,
     seq: 0,
+    workspaces: [],
+    workspaceMembers: [],
     users: [],
     invites: [],
     teams: [],
@@ -189,18 +215,33 @@ export function createSeedDb(): MockDb {
     notifications: [],
   };
 
-  const mkUser = (name: string, email: string, role: Role, avatarColor: string) => {
+  const mkWorkspace = (name: string, color: string, domain: string | null = null) => {
+    const w: WorkspaceRow = { id: uid(db, 'wksp'), name, isOrganization: !!domain, domain, color, createdAt: now };
+    db.workspaces.push(w);
+    return w;
+  };
+  const join = (w: WorkspaceRow, u: UserRow, role: WorkspaceRole) => {
+    db.workspaceMembers.push({ workspaceId: w.id, userId: u.id, role, isActive: true, joinedAt: now });
+    u.lastWorkspaceId ??= w.id;
+  };
+  // SPEC §12 seed: "Mekari" (organization on example.com) holds the v1 data; "Acme Pilot" is a
+  // small second workspace with a guest.
+  const mekari = mkWorkspace('Mekari', '#651fff', 'example.com');
+  let ws = mekari;
+
+  const mkUser = (name: string, email: string, role: WorkspaceRole | null, avatarColor: string) => {
     const u: UserRow = {
       id: uid(db, 'user'),
       email,
       name,
       password: 'password123',
-      role,
       isActive: true,
       avatarColor,
       createdAt: now,
+      lastWorkspaceId: null,
     };
     db.users.push(u);
+    if (role) join(ws, u, role);
     return u;
   };
   const admin = mkUser('Ada Admin', 'admin@example.com', 'ADMIN', '#8d84e8');
@@ -209,7 +250,7 @@ export function createSeedDb(): MockDb {
   const carol = mkUser('Carol Chen', 'carol@example.com', 'MEMBER', '#e362e3');
 
   const mkTeam = (name: string, description: string, members: UserRow[]) => {
-    const t: TeamRow = { id: uid(db, 'team'), name, description, createdAt: now };
+    const t: TeamRow = { id: uid(db, 'team'), workspaceId: ws.id, name, description, createdAt: now };
     db.teams.push(t);
     members.forEach((m) => db.teamMembers.push({ teamId: t.id, userId: m.id }));
     return t;
@@ -226,6 +267,7 @@ export function createSeedDb(): MockDb {
   ) => {
     const p: ProjectRow = {
       id: uid(db, 'proj'),
+      workspaceId: team.workspaceId,
       teamId: team.id,
       ownerId: owner.id,
       name,
@@ -257,6 +299,7 @@ export function createSeedDb(): MockDb {
     pos += 1000;
     const t: TaskRow = {
       id: uid(db, 'task'),
+      workspaceId: project?.workspaceId ?? ws.id,
       projectId: project?.id ?? null,
       sectionId: section?.id ?? null,
       parentId: null,
@@ -364,6 +407,7 @@ export function createSeedDb(): MockDb {
   db.notifications.push(
     {
       id: uid(db, 'ntfy'),
+      workspaceId: mekari.id,
       userId: admin.id,
       actorId: alice.id,
       taskId: t1.id,
@@ -373,6 +417,7 @@ export function createSeedDb(): MockDb {
     },
     {
       id: uid(db, 'ntfy'),
+      workspaceId: mekari.id,
       userId: admin.id,
       actorId: carol.id,
       taskId: db.tasks.find((t) => t.title === 'Landing page A/B test')!.id,
@@ -382,14 +427,48 @@ export function createSeedDb(): MockDb {
     },
   );
 
-  seedGoals(db, { admin, alice, bob, carol, eng, mkt, webProjectId: web.p.id });
+  seedGoals(db, { workspaceId: mekari.id, admin, alice, bob, carol, eng, mkt, webProjectId: web.p.id });
+
+  // ---- Acme Pilot: alice ADMIN, bob MEMBER, a guest on one project ----
+  const acme = mkWorkspace('Acme Pilot', '#f1bd6c');
+  ws = acme;
+  join(acme, alice, 'ADMIN');
+  join(acme, bob, 'MEMBER');
+  const guest = mkUser('Gina Guest', 'guest@partner.test', 'GUEST', '#f26fb2');
+  const pilot = mkTeam('Pilot Team', 'Running the Acme pilot', [alice, bob]);
+  const rollout = mkProject(pilot, alice, 'Pilot Rollout', '#4573d2');
+  db.projectMembers.push(
+    { projectId: rollout.p.id, userId: bob.id, role: 'EDITOR' },
+    { projectId: rollout.p.id, userId: guest.id, role: 'EDITOR' },
+  );
+  const [rTodo, rProg, rDone] = rollout.sections;
+  mkTask(rollout.p, rTodo, 'Kick-off with Acme', { assigneeId: alice.id, dueDate: day(1), creatorId: alice.id });
+  mkTask(rollout.p, rTodo, 'Share access checklist', { assigneeId: guest.id, dueDate: day(3), creatorId: alice.id });
+  mkTask(rollout.p, rTodo, 'Import Acme backlog', { assigneeId: bob.id, dueDate: day(5), priority: 'MEDIUM', creatorId: alice.id });
+  mkTask(rollout.p, rProg, 'Configure SSO', { assigneeId: bob.id, dueDate: day(2), priority: 'HIGH', creatorId: alice.id });
+  mkTask(rollout.p, rProg, 'Pilot feedback survey', { assigneeId: guest.id, dueDate: day(8), creatorId: alice.id });
+  mkTask(rollout.p, rProg, 'Weekly sync notes', { assigneeId: alice.id, creatorId: alice.id });
+  mkTask(rollout.p, rDone, 'Sign pilot agreement', { assigneeId: alice.id, completed: true, completedAt: now, creatorId: alice.id });
+  mkTask(rollout.p, rDone, 'Create Acme workspace', { assigneeId: alice.id, completed: true, completedAt: now, creatorId: alice.id });
+  const internal = mkProject(pilot, bob, 'Pilot internal notes', '#6d6e6f');
+  mkTask(internal.p, internal.sections[0], 'Pricing for Acme', { assigneeId: bob.id, creatorId: bob.id });
+  db.notifications.push({
+    id: uid(db, 'ntfy'),
+    workspaceId: acme.id,
+    userId: bob.id,
+    actorId: alice.id,
+    taskId: db.tasks.find((t) => t.title === 'Configure SSO')!.id,
+    type: 'ASSIGNED',
+    read: false,
+    createdAt: now,
+  });
   return db;
 }
 
 /** SPEC §10 seed: company goal (SUB_GOALS) → 2 team goals → individual goals with KRs. */
 function seedGoals(
   db: MockDb,
-  r: { admin: UserRow; alice: UserRow; bob: UserRow; carol: UserRow; eng: TeamRow; mkt: TeamRow; webProjectId: string },
+  r: { workspaceId: string; admin: UserRow; alice: UserRow; bob: UserRow; carol: UserRow; eng: TeamRow; mkt: TeamRow; webProjectId: string },
 ) {
   const now = new Date();
   const iso = now.toISOString();
@@ -402,6 +481,7 @@ function seedGoals(
   const goal = (g: Partial<GoalRow> & Pick<GoalRow, 'title' | 'ownerId'>) => {
     const row: GoalRow = {
       id: uid(db, 'goal'),
+      workspaceId: r.workspaceId,
       description: null,
       isCompany: false,
       teamId: null,

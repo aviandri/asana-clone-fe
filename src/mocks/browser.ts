@@ -2,7 +2,7 @@ import { setFetch } from '@/api/client';
 import { createMockFetch } from './backend';
 import { createSeedDb, type MockDb } from './db';
 
-const STORAGE_KEY = 'asana-clone:mock-db:v1';
+const STORAGE_KEY = 'mekari-project:mock-db:v2'; // v2: workspaces (SPEC §12)
 
 function load(): MockDb {
   try {

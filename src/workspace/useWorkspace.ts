@@ -22,8 +22,8 @@ export function resetWorkspaceCache(qc: QueryClient, me: Me) {
 type SwitchOpts = {
   /** Where to land afterwards; `false` stays on the current URL (deep links). Default: Home. */
   to?: string | false;
-  /** Toast text; default "Switched to <name>". */
-  message?: string;
+  /** Toast text; default "Switched to <name>"; `null` switches silently (e.g. `?workspace=` links). */
+  message?: string | null;
   /** The server already made it current (POST /workspaces does) — skip POST /switch. */
   alreadyCurrent?: boolean;
 };
@@ -60,7 +60,7 @@ export function useSwitchWorkspace() {
           if (stale()) return;
           commit(qc, me);
           if (opts.to !== false) navigate(opts.to ?? '/');
-          showToast(opts.message ?? `Switched to ${ws.name}`, 'info');
+          if (opts.message !== null) showToast(opts.message ?? `Switched to ${ws.name}`, 'info');
         } catch (e) {
           if (!stale()) showToast(errorMessage(e));
         } finally {

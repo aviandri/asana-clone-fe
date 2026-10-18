@@ -16,14 +16,16 @@
 //   ALICE_EMAIL     default alice@example.com   │ seed users (SPEC §7) — must exist and be active,
 //   BOB_EMAIL       default bob@example.com     │ admin must be ADMIN, alice/bob MEMBER
 //   SEED_PASSWORD   default password123         ┘
+//   GUEST_EMAIL     default guest@partner.test  — §12 seed guest in "Acme Pilot"
 //
 // Data: everything it creates lives in a "[fe-smoke]" team + project (PRIVATE), deleted at the end
 // (also on failure). The v1.1 goals block (end of file) also creates "[fe-smoke]" goals, a
 // PRIVATE project and a goals-only team, and the §11 reports block a PRIVATE project; each block
-// deletes its own data in its `finally`. It marks at most one of alice's smoke notifications as read
+// deletes its own data in its `finally`. The v1.2 §12 block creates a "[fe-smoke]" workspace (deleted
+// at its end) and one throwaway user per run who ends with no workspace (users can't be deleted). It marks at most one of alice's smoke notifications as read
 // and does not call read-all. Requires Node 20+ (global fetch, Headers#getSetCookie). Exit code 1 on
 // any failure.
-// Note: it performs 4 logins; keep AUTH_RATE_LIMIT_MAX ≥ 5/min for the test IP.
+// Note: it performs 5 logins plus 1 accept-invite; keep AUTH_RATE_LIMIT_MAX ≥ 7/min for the test IP.
 
 const ORIGIN = (process.env.BASE_URL ?? 'http://127.0.0.1:3000').replace(/\/+$/, '');
 const BASE = `${ORIGIN}/api/v1`;
@@ -31,6 +33,7 @@ const PASSWORD = process.env.SEED_PASSWORD ?? 'password123';
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'admin@example.com';
 const ALICE_EMAIL = process.env.ALICE_EMAIL ?? 'alice@example.com';
 const BOB_EMAIL = process.env.BOB_EMAIL ?? 'bob@example.com';
+const GUEST_EMAIL = process.env.GUEST_EMAIL ?? 'guest@partner.test';
 const PREFIX = '[fe-smoke]';
 
 // ---------- tiny schema checker ----------
@@ -119,10 +122,10 @@ function check(value, schema, path = '$', out = []) {
 // ---------- http with cookie jar per user ----------
 function client(label) {
   let cookie = '';
-  return async function call(method, path, body) {
+  return async function call(method, path, body, headers) {
     const res = await fetch(BASE + path, {
       method,
-      headers: { ...(body !== undefined && { 'content-type': 'application/json' }), ...(cookie && { cookie }) },
+      headers: { ...(body !== undefined && { 'content-type': 'application/json' }), ...(cookie && { cookie }), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const set = res.headers.getSetCookie?.() ?? [];
@@ -262,6 +265,7 @@ try {
 
   await contractV11Goals({ aliceUser, bobUser, teamId }); // v1.1 §10, defined at the end of this file
   await contractV11Reports({ aliceUser, bobUser, teamId }); // v1.1 §11, defined at the end of this file
+  await contractV12Workspaces({ aliceUser, bobUser }); // v1.2 §12, defined at the end of this file
 } catch (e) {
   results.push({ name: 'UNCAUGHT', ok: false, problems: [String(e?.stack ?? e)] });
 } finally {
@@ -572,4 +576,196 @@ function parseCsv(text) {
   }
   if (field || record.length) { record.push(field); records.push(record); }
   return { header: records[0] ?? [], records: records.slice(1), bareLf };
+}
+
+// =====================================================================================
+// v1.2 §12 Workspaces (owned by platform/QA, asana-clone-a0). Needs the full seed (SPEC §12):
+// "Mekari" (organization, domain example.com; admin, alice, bob) and "Acme Pilot" (alice ADMIN,
+// bob MEMBER, GUEST_EMAIL a GUEST on project "Pilot Rollout" only). bob creates a "[fe-smoke]"
+// workspace that is deleted in `finally`; one invited "joiner" user per run is left with no
+// workspace. Ends with alice and bob back on Mekari as their current workspace.
+// =====================================================================================
+async function contractV12Workspaces({ aliceUser, bobUser }) {
+  const Role = oneOf('ADMIN', 'MEMBER', 'GUEST');
+  const Workspace = { id: S, name: S, isOrganization: B, domain: nul(S), color: S, myRole: Role, memberCount: N, createdAt: S };
+  const WsUser = { ...UserSummary, role: Role, isActive: B, createdAt: S };
+  const Me = { ...WsUser, currentWorkspace: nul(Workspace), workspaces: arr(Workspace) };
+  const PendingInvite = { id: S, workspace: { id: S, name: S, color: S }, role: Role, invitedBy: UserSummary, expiresAt: S };
+  const WsInvite = { ...Invite, role: Role, workspaceId: S };
+  const W = (shape) => ({ ...shape, workspaceId: S }); // §12: Team/Project/Task/Goal responses gain workspaceId
+  const same = (name, actual, expected) =>
+    results.push({ name, ok: JSON.stringify(actual) === JSON.stringify(expected), problems: [`got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`] });
+  const truthy = (name, ok, detail) => results.push({ name, ok: Boolean(ok), problems: [detail] });
+  const ws = (id) => ({ 'x-workspace-id': id });
+  const ids = (body) => (body?.data ?? []).map((x) => x.id);
+  const errorPath = (body) => JSON.stringify(body?.error?.details ?? '');
+  const now = new Date();
+  const period = `${now.getUTCFullYear()}-Q${Math.floor(now.getUTCMonth() / 3) + 1}`;
+  const stamp = Date.now();
+  const guest = client('guest');
+  const joiner = client('joiner');
+  let mekari, smokeWsId, smokeWsName, personalTaskId, acmeGoalId, acmeHiddenProjectId;
+
+  try {
+    // ---- Me, list, get ----
+    const me = expect('GET /auth/me (§12 Me)', await alice('GET', '/auth/me'), 200, Me);
+    mekari = me?.workspaces?.find((w) => w.name === 'Mekari');
+    const acme = me?.workspaces?.find((w) => w.name === 'Acme Pilot');
+    if (!mekari || !acme) throw new Error(`§12 seed workspaces missing for alice: ${JSON.stringify(me?.workspaces?.map((w) => w.name))}`);
+    same('seed: Mekari is an organization on example.com; alice ADMIN of Acme Pilot', [mekari.isOrganization, mekari.domain, acme.myRole], [true, 'example.com', 'ADMIN']);
+    const names = me.workspaces.map((w) => w.name);
+    same('Me.workspaces sorted by name', names, [...names].sort((a, b) => a.localeCompare(b)));
+    expect('GET /workspaces', await alice('GET', '/workspaces'), 200, List(Workspace));
+    expect('GET /workspaces/:id', await alice('GET', `/workspaces/${acme.id}`), 200, Workspace);
+    expect('GET /workspaces/:id as non-member → 404', await admin('GET', `/workspaces/${acme.id}`), 404, ErrorBody);
+
+    // ---- create + switch ----
+    smokeWsName = `${PREFIX} ws ${stamp}`;
+    const created = expect('POST /workspaces', await bob('POST', '/workspaces', { name: smokeWsName }), 201, Workspace);
+    smokeWsId = created?.id;
+    same('new workspace: caller ADMIN, 1 member, not an organization', [created?.myRole, created?.memberCount, created?.isOrganization, created?.domain], ['ADMIN', 1, false, null]);
+    const bobMe = await bob('GET', '/auth/me');
+    same('creating a workspace makes it current (User.role = role there)', [bobMe.body?.currentWorkspace?.id, bobMe.body?.role], [smokeWsId, 'ADMIN']);
+    expect('POST /workspaces/:id/switch', await bob('POST', `/workspaces/${mekari.id}/switch`), 200, Workspace);
+    const bobMe2 = await bob('GET', '/auth/me');
+    same('switch sets the current workspace and role', [bobMe2.body?.currentWorkspace?.id, bobMe2.body?.role], [mekari.id, 'MEMBER']);
+    expect('switch to a workspace you are not in → 404', await admin('POST', `/workspaces/${smokeWsId}/switch`), 404, ErrorBody);
+
+    // ---- X-Workspace-Id scoping (bob's current = Mekari, header = smoke workspace) ----
+    const team = expect('POST /teams with X-Workspace-Id', await bob('POST', '/teams', { name: `${PREFIX} ws team` }, ws(smokeWsId)), 201, W(TeamDetail));
+    same('team created in the header workspace', team?.workspaceId, smokeWsId);
+    const proj = expect('POST /projects with X-Workspace-Id', await bob('POST', '/projects', { teamId: team.id, name: `${PREFIX} ws project` }, ws(smokeWsId)), 201, W(ProjectDetail));
+    const secret = `${PREFIX} isolated ${stamp}`;
+    const task = expect('POST /tasks into that project (no header)', await bob('POST', '/tasks', { title: secret, projectId: proj.id }), 201, W(TaskDetail));
+    same('project and task get the workspace of their team/project', [proj?.workspaceId, task?.workspaceId], [smokeWsId, smokeWsId]);
+    same('GET /projects with header lists only that workspace', ids(await bob('GET', '/projects', undefined, ws(smokeWsId)).then((r) => r.body)), [proj.id]);
+    const cur = await bob('GET', '/projects');
+    truthy('GET /projects without header uses the current workspace', cur.status === 200 && !ids(cur.body).includes(proj.id), `status=${cur.status}`);
+    expect('X-Workspace-Id of a workspace you are not in → 404', await admin('GET', '/projects', undefined, ws(smokeWsId)), 404, ErrorBody);
+    expect('ID-addressed endpoints ignore the header', await bob('GET', `/projects/${proj.id}`, undefined, ws(mekari.id)), 200, W(ProjectDetail));
+
+    // ---- isolation: workspace B's resources from a user only in A ----
+    expect('GET /projects/:id of another workspace → 404', await admin('GET', `/projects/${proj.id}`), 404, ErrorBody);
+    expect('GET /teams/:id of another workspace → 404', await admin('GET', `/teams/${team.id}`), 404, ErrorBody);
+    expect('GET /tasks/:id of another workspace → 404', await admin('GET', `/tasks/${task.id}`), 404, ErrorBody);
+    const leak = await admin('GET', `/search?q=${encodeURIComponent(secret)}`);
+    truthy('search does not cross workspaces', leak.status === 200 && leak.body?.tasks?.length === 0 && leak.body?.projects?.length === 0, `status=${leak.status} tasks=${leak.body?.tasks?.length}`);
+    const hit = await bob('GET', `/search?q=${encodeURIComponent(secret)}`, undefined, ws(smokeWsId));
+    truthy('search in the header workspace finds it (control)', hit.body?.tasks?.some((t) => t.id === task.id), `tasks=${hit.body?.tasks?.length}`);
+
+    // ---- no cross-workspace references ----
+    expect('assign to a non-member of the workspace → 400', await bob('PATCH', `/tasks/${task.id}`, { assigneeId: aliceUser.id }), 400, ErrorBody);
+    const personal = expect('POST /tasks personal (current workspace)', await bob('POST', '/tasks', { title: `${PREFIX} personal ${stamp}` }), 201, W(TaskDetail));
+    personalTaskId = personal?.id;
+    same('personal task lands in the current workspace', personal?.workspaceId, mekari.id);
+    expect("move a task into another workspace's project → 400", await bob('PATCH', `/tasks/${personalTaskId}`, { projectId: proj.id }), 400, ErrorBody);
+
+    // ---- invite + /me/invites accept ----
+    expect('POST /admin/invites (workspace from header)', await bob('POST', '/admin/invites', { email: ALICE_EMAIL, role: 'MEMBER' }, ws(smokeWsId)), 201, WsInvite);
+    const pending = expect('GET /me/invites', await alice('GET', '/me/invites'), 200, List(PendingInvite));
+    const mine = pending?.data?.find((p) => p.workspace.id === smokeWsId);
+    same('pending invite carries workspace, role and inviter', [mine?.workspace?.name, mine?.role, mine?.invitedBy?.id], [smokeWsName, 'MEMBER', bobUser.id]);
+    expect("accept someone else's invite → 404", await admin('POST', `/me/invites/${mine?.id}/accept`), 404, ErrorBody);
+    const acc = expect('POST /me/invites/:id/accept', await alice('POST', `/me/invites/${mine?.id}/accept`), 200, Workspace);
+    same('accepted: MEMBER, memberCount 2', [acc?.myRole, acc?.memberCount], ['MEMBER', 2]);
+    expect('invite an active member again → 409', await bob('POST', '/admin/invites', { email: ALICE_EMAIL, role: 'MEMBER' }, ws(smokeWsId)), 409, ErrorBody);
+    expect('assign to a member of the workspace → 200', await bob('PATCH', `/tasks/${task.id}`, { assigneeId: aliceUser.id }), 200, W(TaskDetail));
+    expect('member → PATCH /workspaces/:id → 403', await alice('PATCH', `/workspaces/${smokeWsId}`, { name: 'nope' }), 403, ErrorBody);
+    expect('member → GET /admin/users → 403', await alice('GET', '/admin/users', undefined, ws(smokeWsId)), 403, ErrorBody);
+    const members = expect('GET /admin/users (current-workspace members)', await bob('GET', '/admin/users', undefined, ws(smokeWsId)), 200, List(WsUser));
+    same('/admin/users lists exactly the workspace members', ids(members).sort(), [aliceUser.id, bobUser.id].sort());
+
+    // ---- decline ----
+    expect('POST /admin/invites role GUEST', await bob('POST', '/admin/invites', { email: ADMIN_EMAIL, role: 'GUEST' }, ws(smokeWsId)), 201, WsInvite);
+    const adminInv = (await admin('GET', '/me/invites')).body?.data?.find((p) => p.workspace.id === smokeWsId);
+    expect('DELETE /me/invites/:id (decline)', await admin('DELETE', `/me/invites/${adminInv?.id}`), 204);
+    truthy('declined invite is gone', !(await admin('GET', '/me/invites')).body?.data?.some((p) => p.id === adminInv?.id), `id=${adminInv?.id}`);
+
+    // ---- last active admin → 409 ----
+    expect('last admin leaves → 409', await bob('POST', `/workspaces/${smokeWsId}/leave`), 409, ErrorBody);
+    expect('last admin demoted → 409', await bob('PATCH', `/admin/users/${bobUser.id}`, { role: 'MEMBER' }, ws(smokeWsId)), 409, ErrorBody);
+    expect('last admin deactivated → 409', await bob('PATCH', `/admin/users/${bobUser.id}`, { isActive: false }, ws(smokeWsId)), 409, ErrorBody);
+
+    // ---- deactivate / reactivate / leave ----
+    expect('POST /teams/:id/members (alice)', await bob('POST', `/teams/${team.id}/members`, { userId: aliceUser.id }), 200, W(TeamDetail));
+    expect('PATCH /admin/users/:id isActive=false', await bob('PATCH', `/admin/users/${aliceUser.id}`, { isActive: false }, ws(smokeWsId)), 200, WsUser);
+    const teamAfter = await bob('GET', `/teams/${team.id}`);
+    same("deactivation removes them from the workspace's teams", teamAfter.body?.members?.some((m) => m.id === aliceUser.id), false);
+    expect('deactivated member → ID-addressed 404', await alice('GET', `/projects/${proj.id}`), 404, ErrorBody);
+    expect('PATCH /admin/users/:id isActive=true', await bob('PATCH', `/admin/users/${aliceUser.id}`, { isActive: true }, ws(smokeWsId)), 200, WsUser);
+    expect('POST /workspaces/:id/leave', await alice('POST', `/workspaces/${smokeWsId}/leave`), 204);
+    truthy('left workspace disappears from GET /workspaces', !ids((await alice('GET', '/workspaces')).body).includes(smokeWsId), '');
+
+    // ---- organization: external people can only be guests ----
+    const external = `fe-smoke-${stamp}@partner.test`;
+    const extMember = expect('org: invite external email as MEMBER → 400', await admin('POST', '/admin/invites', { email: external, role: 'MEMBER' }, ws(mekari.id)), 400, ErrorBody);
+    truthy('org external-invite 400 names the role field', errorPath(extMember).includes('role'), errorPath(extMember));
+    const extGuest = expect('org: invite external email as GUEST → 201', await admin('POST', '/admin/invites', { email: external, role: 'GUEST' }, ws(mekari.id)), 201, WsInvite);
+    if (extGuest?.id) expect('DELETE /admin/invites/:id (external guest)', await admin('DELETE', `/admin/invites/${extGuest.id}`, undefined, ws(mekari.id)), 204);
+
+    // ---- guest matrix (Acme Pilot) ----
+    const gme = expect('POST /auth/login (guest)', await guest('POST', '/auth/login', { email: GUEST_EMAIL, password: PASSWORD }), 200, Me);
+    same('guest: GUEST in Acme Pilot only', [gme?.role, gme?.currentWorkspace?.id, gme?.workspaces?.map((w) => w.id)], ['GUEST', acme.id, [acme.id]]);
+    const gProjects = expect('guest GET /projects', await guest('GET', '/projects'), 200, List(W(Project)));
+    same('guest sees only the projects they are a member of', gProjects?.data?.map((p) => p.name), ['Pilot Rollout']);
+    const pilot = gProjects?.data?.[0];
+    expect('guest GET /projects/:id/tasks', await guest('GET', `/projects/${pilot?.id}/tasks`), 200, List(W(Task)));
+    expect('guest GET /projects/:id/report (visible project)', await guest('GET', `/projects/${pilot?.id}/report`), 200, any);
+    expect('guest GET /reports/workload → 403', await guest('GET', '/reports/workload'), 403, ErrorBody);
+    const pilotTeam = (await alice('GET', '/teams', undefined, ws(acme.id))).body?.data?.find((t) => t.id === pilot?.teamId);
+    expect('guest POST /projects → 403', await guest('POST', '/projects', { teamId: pilot?.teamId, name: `${PREFIX} guest` }), 403, ErrorBody);
+    expect('guest POST /teams → 403', await guest('POST', '/teams', { name: `${PREFIX} guest` }), 403, ErrorBody);
+    expect('adding a guest to a team → 400', await alice('POST', `/teams/${pilotTeam?.id}/members`, { userId: gme?.id }), 400, ErrorBody);
+    const hidden = expect('PUBLIC project in Acme the guest is not on', await alice('POST', '/projects', { teamId: pilotTeam?.id, name: `${PREFIX} acme public`, privacy: 'PUBLIC' }, ws(acme.id)), 201, W(ProjectDetail));
+    acmeHiddenProjectId = hidden?.id;
+    expect('guest GET non-member project (even PUBLIC) → 404', await guest('GET', `/projects/${acmeHiddenProjectId}`), 404, ErrorBody);
+    const gGoals = expect('guest GET /goals → empty', await guest('GET', '/goals'), 200, List(any));
+    same('guest goal list is empty', gGoals?.data?.length, 0);
+    const acmeGoal = expect('admin POST company goal in Acme', await alice('POST', '/goals', { title: `${PREFIX} acme goal`, timePeriod: period, isCompany: true }, ws(acme.id)), 201, any);
+    acmeGoalId = acmeGoal?.id;
+    same('goal gets the header workspace', acmeGoal?.workspaceId, acme.id);
+    expect('guest GET /goals/:id → 404', await guest('GET', `/goals/${acmeGoalId}`), 404, ErrorBody);
+    expect('guest POST /goals → 403', await guest('POST', '/goals', { title: `${PREFIX} guest goal`, timePeriod: period }), 403, ErrorBody);
+    const pilotDetail = (await alice('GET', `/projects/${pilot?.id}`)).body;
+    const shared = new Set(pilotDetail?.members?.map((m) => m.user.id));
+    const gUsers = expect('guest GET /users', await guest('GET', '/users'), 200, List(UserSummary));
+    truthy('guest /users lists only people sharing a project', gUsers?.data?.length > 0 && gUsers.data.every((u) => shared.has(u.id)), `users=${gUsers?.data?.map((u) => u.email).join(',')}`);
+    expect('guest GET /admin/users → 403', await guest('GET', '/admin/users'), 403, ErrorBody);
+    expect('guest PATCH /workspaces/:id → 403', await guest('PATCH', `/workspaces/${acme.id}`, { name: 'nope' }), 403, ErrorBody);
+
+    // ---- joinable / join, then NO_WORKSPACE (new example.com user, first only in the smoke workspace) ----
+    const jInv = expect('POST /admin/invites (new example.com user)', await bob('POST', '/admin/invites', { email: `fe-smoke-join-${stamp}@example.com`, role: 'MEMBER' }, ws(smokeWsId)), 201, WsInvite);
+    const jMe = expect('POST /auth/accept-invite (§12 Me)', await joiner('POST', '/auth/accept-invite', { token: jInv?.token, name: `${PREFIX} joiner`, password: PASSWORD }), [200, 201], Me);
+    same('accept-invite: current = invited workspace', jMe?.currentWorkspace?.id, smokeWsId);
+    expect('reusing an accepted invite token → 409|410|404', await client('anon')('POST', '/auth/accept-invite', { token: jInv?.token, name: 'x', password: PASSWORD }), [409, 410, 404], ErrorBody);
+    const joinable = expect('GET /workspaces/joinable', await joiner('GET', '/workspaces/joinable'), 200, List({ id: S, name: S, color: S, memberCount: N }));
+    truthy('joinable lists the organization matching my email domain', ids(joinable).includes(mekari.id), `ids=${ids(joinable)}`);
+    truthy('joinable excludes orgs I can\'t join (guest)', !ids((await guest('GET', '/workspaces/joinable')).body).includes(mekari.id), '');
+    expect('POST /workspaces/:id/join with a non-matching domain → 403', await guest('POST', `/workspaces/${mekari.id}/join`), 403, ErrorBody);
+    const joined = expect('POST /workspaces/:id/join', await joiner('POST', `/workspaces/${mekari.id}/join`), 201, Workspace);
+    same('joined as MEMBER', joined?.myRole, 'MEMBER');
+    truthy('joined org leaves joinable', !ids((await joiner('GET', '/workspaces/joinable')).body).includes(mekari.id), '');
+    expect('joiner leaves the smoke workspace', await joiner('POST', `/workspaces/${smokeWsId}/leave`), 204);
+    expect('joiner leaves Mekari', await joiner('POST', `/workspaces/${mekari.id}/leave`), 204);
+    same('no workspace → Me.currentWorkspace null', (await joiner('GET', '/auth/me')).body?.currentWorkspace, null);
+    const noWs = expect('no workspace → scoped endpoint 403', await joiner('GET', '/projects'), 403, ErrorBody);
+    truthy('403 details NO_WORKSPACE on path workspace', errorPath(noWs).includes('NO_WORKSPACE') && errorPath(noWs).includes('workspace'), errorPath(noWs));
+
+    // ---- delete ----
+    expect('DELETE /workspaces/:id wrong confirmName → 400', await bob('DELETE', `/workspaces/${smokeWsId}`, { confirmName: `${smokeWsName}x` }), 400, ErrorBody);
+  } catch (e) {
+    results.push({ name: 'UNCAUGHT (v1.2 workspaces)', ok: false, problems: [String(e?.stack ?? e)] });
+  } finally {
+    if (personalTaskId) expect('§12 cleanup DELETE personal task', await bob('DELETE', `/tasks/${personalTaskId}`), 204);
+    if (acmeGoalId) expect('§12 cleanup DELETE Acme goal', await alice('DELETE', `/goals/${acmeGoalId}`), 204);
+    if (acmeHiddenProjectId) expect('§12 cleanup DELETE Acme project', await alice('DELETE', `/projects/${acmeHiddenProjectId}`), 204);
+    if (smokeWsId) {
+      expect('DELETE /workspaces/:id', await bob('DELETE', `/workspaces/${smokeWsId}`, { confirmName: smokeWsName }), 204);
+      expect('deleted workspace → 404', await bob('GET', `/workspaces/${smokeWsId}`), 404, ErrorBody);
+    }
+    if (mekari) for (const [who, call] of [['alice', alice], ['bob', bob]]) {
+      const r = await call('POST', `/workspaces/${mekari.id}/switch`);
+      if (r.status !== 200) results.push({ name: `§12 cleanup: switch ${who} back to Mekari`, ok: false, problems: [`status ${r.status}`] });
+    }
+  }
 }

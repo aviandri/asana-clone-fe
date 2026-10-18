@@ -17,6 +17,7 @@ import { ProjectPage } from '@/projects/ProjectPage';
 import { TeamPage } from '@/teams/TeamPage';
 import { TeamsPage } from '@/teams/TeamsPage';
 import { OnboardingPage } from '@/workspace/OnboardingPage';
+import { ApplyWorkspaceParam } from '@/workspace/ApplyWorkspaceParam';
 import { WorkspaceSettingsPage } from '@/workspace/settings/WorkspaceSettingsPage';
 
 // Charts (Recharts) load only when reporting is opened.
@@ -45,7 +46,9 @@ export const routes: RouteObject[] = [
         element: (
           <RequireAuth>
             <RequireWorkspace fallback={<OnboardingPage />}>
-              <AppShell />
+              <ApplyWorkspaceParam>
+                <AppShell />
+              </ApplyWorkspaceParam>
             </RequireWorkspace>
           </RequireAuth>
         ),

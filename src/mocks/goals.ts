@@ -3,6 +3,9 @@ import type { Goal, GoalDetail, GoalStatus, GoalUpdate, KeyResult, MetricType, P
 import { uid, type GoalRow, type KeyResultRow, type MockDb, type UserRow } from './db';
 import { HttpError, assertWorkspaceMember, canSeeProject, forbidGuest, forbidden, notFound, nowIso, roleIn, summary, userById, type Handler } from './shared';
 
+/** W2: guests can't own goals or key results. */
+const GUEST_OWNER = 'Guests can’t own goals or key results';
+
 const PERIOD_RE = /^\d{4}(-(H[12]|Q[1-4]))?$/;
 const STATUSES: GoalStatus[] = ['NO_STATUS', 'ON_TRACK', 'AT_RISK', 'OFF_TRACK', 'ACHIEVED', 'PARTIAL', 'MISSED', 'DROPPED'];
 const SOURCES: ProgressSource[] = ['KEY_RESULTS', 'SUB_GOALS', 'PROJECTS', 'MANUAL'];
@@ -246,7 +249,7 @@ export const goalRoutes: [string, string, Handler][] = [
       assertCanCreateAt(db, wsId, { isCompany, teamId }, me!);
       const ownerId: string = body.ownerId ?? me!.id;
       if (!db.users.some((u) => u.id === ownerId && u.isActive)) throw fieldError('ownerId', 'Owner must be an active user');
-      assertWorkspaceMember(db, wsId, ownerId, 'ownerId');
+      assertWorkspaceMember(db, wsId, ownerId, 'ownerId', { noGuests: GUEST_OWNER });
       if (body.progressSource !== undefined && !SOURCES.includes(body.progressSource)) throw fieldError('progressSource', 'bad progressSource');
       assertValidParent(db, wsId, null, body.parentId ?? null);
       const g: GoalRow = {
@@ -286,7 +289,7 @@ export const goalRoutes: [string, string, Handler][] = [
         throw fieldError('manualProgress', 'manualProgress must be 0–100');
       if ('weight' in b && !(Number.isInteger(b.weight) && b.weight >= 1)) throw fieldError('weight', 'weight must be an integer ≥ 1');
       if ('ownerId' in b && !db.users.some((u) => u.id === b.ownerId && u.isActive)) throw fieldError('ownerId', 'Owner must be an active user');
-      if ('ownerId' in b) assertWorkspaceMember(db, g.workspaceId, b.ownerId, 'ownerId');
+      if ('ownerId' in b) assertWorkspaceMember(db, g.workspaceId, b.ownerId, 'ownerId', { noGuests: GUEST_OWNER });
       if ('isCompany' in b || 'teamId' in b) {
         const level = { isCompany: 'isCompany' in b ? !!b.isCompany : g.isCompany, teamId: 'teamId' in b ? (b.teamId ?? null) : g.teamId };
         if (level.isCompany !== g.isCompany || level.teamId !== g.teamId) assertCanCreateAt(db, g.workspaceId, level, me!);
@@ -335,7 +338,7 @@ export const goalRoutes: [string, string, Handler][] = [
         throw fieldError('currentValue', 'BOOLEAN key results take 0 or 1');
       if (!boolean && typeof b.targetValue !== 'number') throw fieldError('targetValue', 'targetValue is required');
       if (b.ownerId && !db.users.some((u) => u.id === b.ownerId && u.isActive)) throw fieldError('ownerId', 'Owner must be an active user');
-      if (b.ownerId) assertWorkspaceMember(db, g.workspaceId, b.ownerId, 'ownerId');
+      if (b.ownerId) assertWorkspaceMember(db, g.workspaceId, b.ownerId, 'ownerId', { noGuests: GUEST_OWNER });
       const startValue = boolean ? 0 : (b.startValue ?? 0);
       const krs = tables(db).krs.filter((k) => k.goalId === g.id);
       const k: KeyResultRow = {
@@ -367,6 +370,7 @@ export const goalRoutes: [string, string, Handler][] = [
       const allowed = canEditGoal(db, g, me!) || (onlyCurrent && k.ownerId === me!.id);
       if (!allowed) throw forbidden();
       validateKrFields(b, true);
+      if (b.ownerId) assertWorkspaceMember(db, g.workspaceId, b.ownerId, 'ownerId', { noGuests: GUEST_OWNER });
       if ((b.metricType ?? k.metricType) === 'BOOLEAN' && 'currentValue' in b && b.currentValue !== 0 && b.currentValue !== 1)
         throw fieldError('currentValue', 'BOOLEAN key results take 0 or 1');
       for (const f of ['title', 'metricType', 'startValue', 'targetValue', 'currentValue', 'unit', 'ownerId', 'position'] as const) {

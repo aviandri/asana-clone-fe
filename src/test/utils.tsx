@@ -10,6 +10,7 @@ import { createSeedDb, type MockDb } from '@/mocks/db';
 export const ADMIN = 'admin@example.com';
 export const ALICE = 'alice@example.com';
 export const BOB = 'bob@example.com';
+export const GUEST = 'guest@partner.test';
 
 /** Fresh seeded mock backend wired into the API client. Optionally pre-logged-in. */
 export function setupMockApi(loginAs?: string) {

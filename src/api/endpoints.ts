@@ -19,6 +19,7 @@ import type {
   JoinableWorkspace,
   ListResponse,
   Me,
+  PickableUser,
   PendingInvite,
   Workspace,
   NotificationsResponse,
@@ -36,7 +37,6 @@ import type {
   UpdateProjectInput,
   UpdateTaskInput,
   User,
-  UserSummary,
 } from './types';
 
 export const authApi = {
@@ -68,7 +68,7 @@ export const workspacesApi = {
 };
 
 export const usersApi = {
-  list: (q?: string) => http.get<ListResponse<UserSummary>>('/users', { q }),
+  list: (q?: string) => http.get<ListResponse<PickableUser>>('/users', { q }),
   get: (id: string) => http.get<User>(`/users/${id}`),
   updateMe: (body: {
     name?: string;

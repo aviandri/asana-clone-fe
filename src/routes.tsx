@@ -1,10 +1,9 @@
 import { lazy, Suspense } from 'react';
 import { Navigate, Outlet, type RouteObject } from 'react-router-dom';
-import { AdminPage } from '@/admin/AdminPage';
 import { GoalDetailPage } from '@/goals/GoalDetailPage';
 import { GoalsPage } from '@/goals/GoalsPage';
 import { AuthProvider } from '@/auth/AuthProvider';
-import { RedirectIfAuthed, RequireAdmin, RequireAuth, RequireWorkspace } from '@/auth/guards';
+import { NotForGuests, RedirectIfAuthed, RequireAdmin, RequireAuth, RequireWorkspace } from '@/auth/guards';
 import { FullPageSpinner } from '@/components/Spinner';
 import { AppShell } from '@/layout/AppShell';
 import { MotionRoot } from '@/motion/MotionRoot';
@@ -18,6 +17,7 @@ import { ProjectPage } from '@/projects/ProjectPage';
 import { TeamPage } from '@/teams/TeamPage';
 import { TeamsPage } from '@/teams/TeamsPage';
 import { OnboardingPage } from '@/workspace/OnboardingPage';
+import { WorkspaceSettingsPage } from '@/workspace/settings/WorkspaceSettingsPage';
 
 // Charts (Recharts) load only when reporting is opened.
 const ReportingPage = lazy(() => import('@/reporting/ReportingPage'));
@@ -53,7 +53,7 @@ export const routes: RouteObject[] = [
           { index: true, element: <HomePage /> },
           { path: 'my-tasks', element: <MyTasksPage /> },
           { path: 'inbox', element: <InboxPage /> },
-          { path: 'goals', element: <GoalsPage /> },
+          { path: 'goals', element: <NotForGuests what="Goals"><GoalsPage /></NotForGuests> },
           {
             path: 'reporting',
             element: (
@@ -62,15 +62,15 @@ export const routes: RouteObject[] = [
               </Suspense>
             ),
           },
-          { path: 'goals/:goalId', element: <GoalDetailPage /> },
-          { path: 'teams', element: <TeamsPage /> },
-          { path: 'teams/:teamId', element: <TeamPage /> },
+          { path: 'goals/:goalId', element: <NotForGuests what="Goals"><GoalDetailPage /></NotForGuests> },
+          { path: 'teams', element: <NotForGuests what="Teams"><TeamsPage /></NotForGuests> },
+          { path: 'teams/:teamId', element: <NotForGuests what="Teams"><TeamPage /></NotForGuests> },
           { path: 'projects/:projectId/:view?', element: <ProjectPage /> },
           {
             path: 'workspace/settings',
             element: (
               <RequireAdmin>
-                <AdminPage />
+                <WorkspaceSettingsPage />
               </RequireAdmin>
             ),
           },

@@ -141,12 +141,12 @@ export function assertNotLastAdmin(db: MockDb, workspaceId: string) {
 }
 
 /** 400 VALIDATION on `field` unless `userId` is an active member of the workspace (no cross-workspace refs). */
-export function assertWorkspaceMember(db: MockDb, workspaceId: string, userId: string, field: string, opts: { noGuests?: boolean } = {}) {
+export function assertWorkspaceMember(db: MockDb, workspaceId: string, userId: string, field: string, opts: { noGuests?: boolean | string } = {}) {
   const role = roleIn(db, workspaceId, userId);
   const user = db.users.find((u) => u.id === userId);
   let message: string | null = null;
   if (!user || !role) message = `${user?.name ?? 'That person'} isn’t a member of this workspace`;
-  else if (opts.noGuests && role === 'GUEST') message = 'Guests can’t join teams';
+  else if (opts.noGuests && role === 'GUEST') message = typeof opts.noGuests === 'string' ? opts.noGuests : 'Guests can’t join teams';
   if (message) throw new HttpError(400, 'VALIDATION', message, [{ path: [field], message }]);
 }
 
@@ -265,7 +265,8 @@ export function visibleProject(db: MockDb, id: string, me: UserRow) {
 }
 export function visibleTeam(db: MockDb, id: string, me: UserRow) {
   const t = db.teams.find((x) => x.id === id);
-  if (!t || !roleIn(db, t.workspaceId, me.id)) throw notFound();
+  const role = t && roleIn(db, t.workspaceId, me.id);
+  if (!t || !role || role === 'GUEST') throw notFound(); // W1: guests are never team members
   return t;
 }
 const isWsAdmin = (db: MockDb, workspaceId: string, me: UserRow) => roleIn(db, workspaceId, me.id) === 'ADMIN';
@@ -276,6 +277,7 @@ export function assertCanEditProjectContent(db: MockDb, p: ProjectRow, me: UserR
 }
 export function assertProjectOwner(db: MockDb, p: ProjectRow, me: UserRow) {
   if (isWsAdmin(db, p.workspaceId, me)) return;
+  if (roleIn(db, p.workspaceId, me.id) === 'GUEST') throw forbidden(); // W7: guests never manage projects
   const m = db.projectMembers.find((x) => x.projectId === p.id && x.userId === me.id);
   if (m?.role !== 'OWNER') throw forbidden();
 }
@@ -342,5 +344,37 @@ export function removeFromWorkspace(db: MockDb, workspaceId: string, userId: str
       if (existing) existing.role = 'OWNER';
       else db.projectMembers.push({ projectId: p.id, userId: heir, role: 'OWNER' });
     }
+  }
+}
+
+/** The project-ownership heir when `userId` stops owning: the acting admin, else the longest-standing other admin (W7). */
+function ownerHeir(db: MockDb, workspaceId: string, userId: string, actingId: string | null) {
+  if (actingId && actingId !== userId) return actingId;
+  return (
+    activeMembers(db, workspaceId)
+      .filter((m) => m.role === 'ADMIN' && m.userId !== userId)
+      .sort((a, b) => a.joinedAt.localeCompare(b.joinedAt))[0]?.userId ?? null
+  );
+}
+
+/**
+ * Someone becomes a GUEST (role change or organization conversion): they leave the workspace's
+ * teams (W4), and their OWNER project memberships become EDITOR, passing ownerless projects on (W7).
+ */
+export function demoteToGuest(db: MockDb, m: WorkspaceMemberRow, actingId: string | null) {
+  if (m.role === 'GUEST') return;
+  m.role = 'GUEST';
+  const teamIds = new Set(db.teams.filter((t) => t.workspaceId === m.workspaceId).map((t) => t.id));
+  db.teamMembers = db.teamMembers.filter((tm) => !(tm.userId === m.userId && teamIds.has(tm.teamId)));
+  for (const p of db.projects.filter((x) => x.workspaceId === m.workspaceId)) {
+    const mine = db.projectMembers.find((pm) => pm.projectId === p.id && pm.userId === m.userId);
+    if (mine?.role !== 'OWNER') continue;
+    mine.role = 'EDITOR';
+    if (db.projectMembers.some((pm) => pm.projectId === p.id && pm.role === 'OWNER')) continue;
+    const heir = ownerHeir(db, m.workspaceId, m.userId, actingId);
+    if (!heir) continue;
+    const existing = db.projectMembers.find((pm) => pm.projectId === p.id && pm.userId === heir);
+    if (existing) existing.role = 'OWNER';
+    else db.projectMembers.push({ projectId: p.id, userId: heir, role: 'OWNER' });
   }
 }

@@ -31,6 +31,7 @@ import {
   onDomain,
   forbidGuest,
   visibleTeam,
+  demoteToGuest,
   userById,
   serializeTeam,
   serializeTeamDetail,
@@ -247,6 +248,14 @@ function usableInvite(db: MockDb, token: string) {
 const bool = (v: string | null) => (v === null ? undefined : v === 'true');
 
 const ROLES = ['ADMIN', 'MEMBER', 'GUEST'];
+
+/** W7: a GUEST can't be a project OWNER. */
+function assertNotGuestOwner(db: MockDb, workspaceId: string, userId: string, role: unknown) {
+  if (role === 'OWNER' && roleIn(db, workspaceId, userId) === 'GUEST') {
+    const message = 'Guests can’t own projects';
+    throw new HttpError(400, 'VALIDATION', message, [{ path: ['role'], message }]);
+  }
+}
 const EXTERNAL_GUEST = 'External people can only be guests';
 
 /** /users and the @mention picker: active members; a guest only sees people they share a project with. */
@@ -350,11 +359,20 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       return {
         data: pickableUsers(db, ws().id, me!, role())
           .filter((u) => !q || u.name.toLowerCase().includes(q) || u.email.includes(q))
-          .map(summary),
+          .map((u) => ({ ...summary(u), role: roleIn(db, ws().id, u.id)! })),
       };
     },
   ],
-  ['GET', '/users/:id', ({ db, params, wsOrNull }) => fullUser(db, userById(db, params.id), wsOrNull())],
+  [
+    'GET',
+    '/users/:id',
+    ({ db, me, params, wsOrNull }) => {
+      const w = wsOrNull();
+      // W7: a guest only finds people they share a project with.
+      if (w && roleIn(db, w.id, me!.id) === 'GUEST' && !pickableUsers(db, w.id, me!, 'GUEST').some((u) => u.id === params.id)) throw notFound();
+      return fullUser(db, userById(db, params.id), w);
+    },
+  ],
   [
     'PATCH',
     '/users/me',
@@ -400,7 +418,8 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
         if (w.isOrganization && body.role !== 'GUEST' && !onDomain(u.email, w.domain)) {
           throw new HttpError(400, 'VALIDATION', EXTERNAL_GUEST, [{ path: ['role'], message: EXTERNAL_GUEST }]);
         }
-        m.role = body.role;
+        if (body.role === 'GUEST') demoteToGuest(db, m, me!.id);
+        else m.role = body.role;
       }
       if (body.isActive !== undefined) {
         if (m.isActive && !body.isActive) removeFromWorkspace(db, w.id, m.userId, me!.id);
@@ -468,9 +487,10 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'GET',
     '/teams',
-    ({ db, me, ws, query }) => {
+    ({ db, me, ws, role, query }) => {
       const mine = query.get('mine') === 'true';
       const wsId = ws().id;
+      if (role() === 'GUEST') return { data: [] }; // W1
       return {
         data: db.teams
           .filter((t) => t.workspaceId === wsId)
@@ -628,6 +648,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       const p = visibleProject(db, params.id, me!);
       assertProjectOwner(db, p, me!);
       assertWorkspaceMember(db, p.workspaceId, String(body?.userId ?? ''), 'userId');
+      assertNotGuestOwner(db, p.workspaceId, String(body.userId), body.role);
       const existing = db.projectMembers.find((m) => m.projectId === p.id && m.userId === body.userId);
       if (existing?.role === 'OWNER' && body.role !== 'OWNER') assertNotLastOwner(db, p.id);
       if (existing) existing.role = body.role;
@@ -643,6 +664,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       assertProjectOwner(db, p, me!);
       const m = db.projectMembers.find((x) => x.projectId === p.id && x.userId === params.userId);
       if (!m) throw notFound();
+      assertNotGuestOwner(db, p.workspaceId, m.userId, body.role);
       if (m.role === 'OWNER' && body.role !== 'OWNER') assertNotLastOwner(db, p.id);
       m.role = body.role;
       return serializeProjectDetail(db, p, me!);

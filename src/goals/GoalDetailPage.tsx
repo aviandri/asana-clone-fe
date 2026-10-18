@@ -126,7 +126,7 @@ function KeyResultRow({ kr, goal }: { kr: KeyResult; goal: GoalDetail }) {
           <ProgressBar value={kr.progress} label={`${kr.title} progress`} />
         </span>
         {canEditAll ? (
-          <AssigneeField assignee={kr.owner} onChange={(u) => m.update.mutateAsync({ id: kr.id, ownerId: u?.id ?? null })} />
+          <AssigneeField noGuests assignee={kr.owner} onChange={(u) => m.update.mutateAsync({ id: kr.id, ownerId: u?.id ?? null })} />
         ) : (
           <Avatar user={kr.owner} size="sm" />
         )}
@@ -483,7 +483,7 @@ export function GoalDetailPage() {
               <span className="flex items-center gap-1">
                 Owner
                 {g.canEdit ? (
-                  <AssigneeField variant="field" assignee={g.owner} onChange={(u) => u && m.update.mutateAsync({ ownerId: u.id })} />
+                  <AssigneeField noGuests variant="field" assignee={g.owner} onChange={(u) => u && m.update.mutateAsync({ ownerId: u.id })} />
                 ) : (
                   <>
                     <Avatar user={g.owner} size="xs" /> {g.owner.name}

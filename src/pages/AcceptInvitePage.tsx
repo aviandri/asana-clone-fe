@@ -1,12 +1,82 @@
-import { useQuery } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ApiError } from '@/api/client';
-import { authApi } from '@/api/endpoints';
+import { authApi, workspacesApi } from '@/api/endpoints';
+import type { InviteInfo } from '@/api/types';
 import { useAuth } from '@/auth/useAuth';
 import { Spinner } from '@/components/Spinner';
 import { errorMessage } from '@/lib/errors';
+import { useSwitchWorkspace } from '@/workspace/useWorkspace';
 import { AuthLayout } from './AuthLayout';
+
+/**
+ * An invite for someone who already has an account (SPEC §12): "Log in to join X" → back here with
+ * `?join=1` → `POST /me/invites/:id/accept` → switch into the workspace.
+ */
+function ExistingAccountInvite({ token, invite }: { token: string; invite: InviteInfo }) {
+  const { user, logout } = useAuth();
+  const [params] = useSearchParams();
+  const switchTo = useSwitchWorkspace();
+  const ws = invite.workspace;
+  const join = useMutation({
+    mutationFn: () => workspacesApi.acceptInvite(invite.id),
+    onSuccess: (w) => switchTo(w, { message: `Welcome to ${w.name}` }),
+    meta: { quiet: true },
+  });
+  const sameEmail = !!user && user.email.toLowerCase() === invite.email.toLowerCase();
+  // Coming back from login: join right away (once).
+  const autoJoined = useRef(false);
+  useEffect(() => {
+    if (sameEmail && params.get('join') === '1' && !autoJoined.current) {
+      autoJoined.current = true;
+      join.mutate();
+    }
+  }, [sameEmail, params, join]);
+
+  if (!user) {
+    const next = `/invite/${encodeURIComponent(token)}?join=1`;
+    return (
+      <AuthLayout title={`Join ${ws.name} on Mekari Project`}>
+        <p className="mb-4 text-sm text-gray-600">
+          <strong>{invite.email}</strong> already has an account. Log in to join {ws.name}
+          {invite.role === 'GUEST' ? ' as a guest' : ''}.
+        </p>
+        <Link to={`/login?next=${encodeURIComponent(next)}`} className="btn-primary w-full py-2">
+          Log in to join {ws.name}
+        </Link>
+      </AuthLayout>
+    );
+  }
+  if (!sameEmail) {
+    return (
+      <AuthLayout title="This invite is for someone else">
+        <p className="mb-4 text-sm text-gray-600">
+          This invite to {ws.name} is for <strong>{invite.email}</strong>, but you’re logged in as <strong>{user.email}</strong>.
+        </p>
+        <button type="button" className="btn-secondary w-full" onClick={() => void logout()}>
+          Log out
+        </button>
+      </AuthLayout>
+    );
+  }
+  return (
+    <AuthLayout title={`Join ${ws.name}`}>
+      <p className="mb-4 text-sm text-gray-600">
+        You’ve been invited to {ws.name}
+        {invite.role === 'GUEST' ? ' as a guest' : ''}.
+      </p>
+      {join.isError && (
+        <p role="alert" className="mb-3 text-sm text-red-600">
+          {errorMessage(join.error, 'Could not join')}
+        </p>
+      )}
+      <button type="button" className="btn-primary w-full py-2" disabled={join.isPending} onClick={() => join.mutate()}>
+        {join.isPending ? 'Joining…' : `Join ${ws.name}`}
+      </button>
+    </AuthLayout>
+  );
+}
 
 export function AcceptInvitePage() {
   const { token = '' } = useParams();
@@ -22,6 +92,7 @@ export function AcceptInvitePage() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [hasAccount, setHasAccount] = useState(false);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -33,6 +104,8 @@ export function AcceptInvitePage() {
       await acceptInvite(token, name.trim(), password);
       navigate('/', { replace: true });
     } catch (err) {
+      // 409: the email got an account meanwhile — accepting is a logged-in action then.
+      if (err instanceof ApiError && err.status === 409) setHasAccount(true);
       setError(errorMessage(err, 'Could not accept invite'));
       setSubmitting(false);
     }
@@ -64,10 +137,14 @@ export function AcceptInvitePage() {
     );
   }
 
+  const info = invite.data!;
+  if (info.existingUser) return <ExistingAccountInvite token={token} invite={info} />;
+
   return (
-    <AuthLayout title="Join your team on Mekari Project">
+    <AuthLayout title={`Join ${info.workspace.name} on Mekari Project`}>
       <p className="mb-4 text-sm text-gray-600">
-        You were invited as <strong>{invite.data?.email}</strong>. Set up your account to continue.
+        You were invited to {info.workspace.name}
+        {info.role === 'GUEST' ? ' as a guest' : ''} as <strong>{info.email}</strong>. Set up your account to continue.
       </p>
       <form onSubmit={onSubmit} className="space-y-4" noValidate>
         <div>
@@ -107,6 +184,14 @@ export function AcceptInvitePage() {
         {error && (
           <p role="alert" className="text-sm text-red-600">
             {error}
+            {hasAccount && (
+              <>
+                {' '}
+                <Link to={`/login?next=${encodeURIComponent(`/invite/${token}?join=1`)}`} className="font-medium underline">
+                  Log in to join {info.workspace.name}
+                </Link>
+              </>
+            )}
           </p>
         )}
         <button type="submit" className="btn-primary w-full py-2" disabled={submitting || !name.trim() || !password}>

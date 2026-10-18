@@ -102,6 +102,7 @@ export function TeamPage() {
                   </button>
                   <Popover open={adding} onClose={() => setAdding(false)} align="right">
                     <UserPickerList
+                      noGuests
                       allowNone={false}
                       excludeIds={t.members.map((u) => u.id)}
                       onPick={(u) => {

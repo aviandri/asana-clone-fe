@@ -3,16 +3,12 @@ import type { KeyboardEvent } from 'react';
 import { Link } from 'react-router-dom';
 import type { Workspace } from '@/api/types';
 import { useCurrentUser } from '@/auth/useAuth';
-import { PlusIcon, SettingsIcon } from '@/components/icons';
+import { LogoutIcon, PlusIcon, SettingsIcon } from '@/components/icons';
 import { useSwitchWorkspace } from './useWorkspace';
 import { useInviteActions, useJoinable, useJoinWorkspace, useMyInvites } from './useWorkspaceQueries';
+import { ROLE_LABEL } from './settings/roles';
 import { WorkspaceTile } from './WorkspaceTile';
 
-const ROLE_LABEL = {
-  ADMIN: 'Admin',
-  MEMBER: 'Member',
-  GUEST: 'Guest',
-} as const;
 const rowBtn =
   'flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm text-gray-800 outline-none hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-primary-500';
 const heading = 'px-2 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-gray-500';
@@ -37,7 +33,18 @@ function onMenuKey(e: KeyboardEvent<HTMLDivElement>) {
  * invites, joinable organizations, Create workspace, and Workspace settings for admins. Used by the
  * sidebar switcher and the profile dialog.
  */
-export function WorkspaceMenuContent({ onDone, onCreate, label = 'Switch workspace' }: { onDone: () => void; onCreate: () => void; label?: string }) {
+export function WorkspaceMenuContent({
+  onDone,
+  onCreate,
+  onLeave,
+  label = 'Switch workspace',
+}: {
+  onDone: () => void;
+  onCreate: () => void;
+  /** Offer "Leave workspace" (the sidebar menu; everyone may leave, SPEC §12). */
+  onLeave?: () => void;
+  label?: string;
+}) {
   const me = useCurrentUser();
   const current = me.currentWorkspace;
   const switchTo = useSwitchWorkspace();
@@ -174,6 +181,22 @@ export function WorkspaceMenuContent({ onDone, onCreate, label = 'Switch workspa
             </span>
             Workspace settings
           </Link>
+        )}
+        {onLeave && current && (
+          <button
+            type="button"
+            role="menuitem"
+            className={rowBtn}
+            onClick={() => {
+              onDone();
+              onLeave();
+            }}
+          >
+            <span className="flex h-6 w-6 items-center justify-center text-gray-500">
+              <LogoutIcon className="h-4 w-4" />
+            </span>
+            Leave {current.name}
+          </button>
         )}
       </div>
     </div>

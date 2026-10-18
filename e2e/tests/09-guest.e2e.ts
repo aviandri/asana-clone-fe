@@ -1,8 +1,6 @@
 import { ACME, GUEST, expect, loginViaUi, test } from '../fixtures';
 
 // SPEC §12 guest experience: guest@partner.test is a GUEST in Acme Pilot, on "Pilot Rollout" only.
-// Guests (SPEC §12) come with BE/FE PR B; opt in with E2E_GUESTS=1 until those land.
-test.skip(!process.env.E2E_GUESTS, 'needs SPEC §12 guests (set E2E_GUESTS=1)');
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test('a guest sees only their project and no member-only features', async ({ page }) => {
@@ -26,6 +24,8 @@ test('a guest sees only their project and no member-only features', async ({ pag
   await expect(projectLinks).toHaveCount(1);
   await projectLinks.click();
   await expect(page.getByRole('heading', { level: 1, name: 'Pilot Rollout' })).toBeVisible();
+  // The seed opens Pilot Rollout on its default Board view; check the list too.
+  await page.getByRole('navigation', { name: 'Project views' }).getByRole('link', { name: 'List' }).click();
   await expect(page.getByRole('table', { name: 'Pilot Rollout tasks' })).toBeVisible();
 
   // Reporting has no Workload for guests.

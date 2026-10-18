@@ -7,6 +7,8 @@ import { Popover } from '@/components/Popover';
 import { CalendarIcon, XIcon } from '@/components/icons';
 import { dueTone, formatDue } from '@/lib/dates';
 import { errorMessage } from '@/lib/errors';
+import { GuestBadge } from '@/workspace/GuestBadge';
+import { useGuestIds } from '@/workspace/useWorkspaceRoles';
 import { PRIORITY_LABEL } from '@/lib/priority';
 
 export function CompleteToggle({
@@ -189,21 +191,25 @@ export function UserPickerList({
   selectedId,
   allowNone = true,
   excludeIds = [],
+  noGuests = false,
 }: {
   onPick: (u: UserSummary | null) => void;
   selectedId?: string | null;
   allowNone?: boolean;
   excludeIds?: string[];
+  /** Leave out workspace guests (they can't join teams, own goals or own projects — SPEC §12). */
+  noGuests?: boolean;
 }) {
   const users = useUsers();
+  const guests = useGuestIds();
   const [q, setQ] = useState('');
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     return (users.data ?? [])
-      .filter((u) => !excludeIds.includes(u.id))
+      .filter((u) => !excludeIds.includes(u.id) && !(noGuests && guests.has(u.id)))
       .filter((u) => !s || u.name.toLowerCase().includes(s) || u.email.toLowerCase().includes(s))
       .slice(0, 20);
-  }, [users.data, q, excludeIds]);
+  }, [users.data, q, excludeIds, noGuests, guests]);
   return (
     <div className="w-64" onClick={(e) => e.stopPropagation()}>
       <div className="px-2 pb-1">
@@ -239,6 +245,7 @@ export function UserPickerList({
             >
               <Avatar user={u} size="sm" />
               <span className="min-w-0 flex-1 truncate">{u.name}</span>
+              {guests.has(u.id) && <GuestBadge />}
               <span className="truncate text-xs text-gray-500">{u.email}</span>
             </button>
           </li>
@@ -254,12 +261,15 @@ export function AssigneeField({
   onChange,
   disabled,
   variant = 'inline',
+  noGuests,
 }: {
   assignee: UserSummary | null;
   /** May return a promise; a rejection is shown inline (e.g. 400 "user can't see this project"). */
   onChange: (u: UserSummary | null) => unknown;
   disabled?: boolean;
   variant?: 'inline' | 'field';
+  /** Owners of goals / key results can't be guests. */
+  noGuests?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -283,6 +293,7 @@ export function AssigneeField({
       </button>
       <Popover open={open} onClose={() => setOpen(false)}>
         <UserPickerList
+          noGuests={noGuests}
           selectedId={assignee?.id ?? null}
           onPick={(u) => {
             setOpen(false);

@@ -6,12 +6,29 @@ import { qk } from '@/api/queryKeys';
 import type { Invite, Role, User } from '@/api/types';
 import { useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
-import { ErrorState, PageHeader } from '@/components/PageHeader';
+import { ErrorState } from '@/components/PageHeader';
 import { Spinner } from '@/components/Spinner';
-import { ShieldIcon } from '@/components/icons';
 import { timeAgo } from '@/lib/dates';
 import { errorMessage } from '@/lib/errors';
 import { format } from 'date-fns';
+import { GuestBadge } from '../GuestBadge';
+import { invalidateMembershipViews } from './invalidate';
+import { isExternal, ROLE_LABEL } from './roles';
+
+
+function RoleOptions({ external }: { external: boolean }) {
+  return (
+    <>
+      <option value="GUEST">Guest</option>
+      <option value="MEMBER" disabled={external}>
+        Member
+      </option>
+      <option value="ADMIN" disabled={external}>
+        Admin
+      </option>
+    </>
+  );
+}
 
 function CopyButton({ text, label = 'Copy link' }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false);
@@ -31,8 +48,10 @@ function CopyButton({ text, label = 'Copy link' }: { text: string; label?: strin
   );
 }
 
-function UsersTab() {
+/** Members of the current workspace (incl. deactivated): role incl. Guest, deactivate. */
+export function MembersTab() {
   const me = useCurrentUser();
+  const ws = me.currentWorkspace!;
   const qc = useQueryClient();
   const users = useQuery({ queryKey: qk.adminUsers, queryFn: () => adminApi.users().then((r) => r.data) });
   const [q, setQ] = useState('');
@@ -40,7 +59,7 @@ function UsersTab() {
     mutationFn: ({ id, ...body }: { id: string; role?: Role; isActive?: boolean }) => adminApi.updateUser(id, body),
     onSuccess: (u) => {
       qc.setQueryData<User[]>(qk.adminUsers, (list) => list?.map((x) => (x.id === u.id ? u : x)));
-      void qc.invalidateQueries({ queryKey: ['users'] });
+      invalidateMembershipViews(qc);
     },
     meta: { quiet: true },
   });
@@ -55,7 +74,8 @@ function UsersTab() {
       <div className="mb-3 flex items-center gap-3">
         <input aria-label="Filter users" placeholder="Filter by name or email" className="input max-w-xs" value={q} onChange={(e) => setQ(e.target.value)} />
         <span className="text-sm text-gray-500">
-          {users.data!.filter((u) => u.isActive).length} active · {users.data!.filter((u) => !u.isActive).length} deactivated
+          {users.data!.filter((u) => u.isActive).length} active · {users.data!.filter((u) => u.isActive && u.role === 'GUEST').length} guests ·{' '}
+          {users.data!.filter((u) => !u.isActive).length} deactivated
         </span>
       </div>
       {update.isError && <p role="alert" className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{errorMessage(update.error)}</p>}
@@ -79,7 +99,11 @@ function UsersTab() {
                     <div className="flex items-center gap-2">
                       <Avatar user={u} size="sm" />
                       <div className="min-w-0">
-                        <div className="truncate font-medium">{u.name}{self && <span className="ml-1 text-xs text-gray-500">(you)</span>}</div>
+                        <div className="flex items-center gap-1.5 truncate font-medium">
+                          {u.name}
+                          {self && <span className="text-xs font-normal text-gray-500">(you)</span>}
+                          {u.role === 'GUEST' && <GuestBadge />}
+                        </div>
                         <div className="truncate text-xs text-gray-500">{u.email}</div>
                       </div>
                     </div>
@@ -93,8 +117,7 @@ function UsersTab() {
                       title={self ? 'You can’t change your own role' : undefined}
                       onChange={(e) => update.mutate({ id: u.id, role: e.target.value as Role })}
                     >
-                      <option value="MEMBER">Member</option>
-                      <option value="ADMIN">Admin</option>
+                      <RoleOptions external={isExternal(ws, u.email)} />
                     </select>
                   </td>
                   <td className="px-3 py-2">
@@ -109,7 +132,7 @@ function UsersTab() {
                         type="button"
                         className={clsx('text-xs hover:underline', u.isActive ? 'text-red-600' : 'text-primary-600')}
                         onClick={() => {
-                          if (!u.isActive || window.confirm(`Deactivate ${u.name}? They won’t be able to log in.`)) {
+                          if (!u.isActive || window.confirm(`Deactivate ${u.name}? They’ll lose access to ${ws.name} and leave its teams and projects.`)) {
                             update.mutate({ id: u.id, isActive: !u.isActive });
                           }
                         }}
@@ -128,14 +151,18 @@ function UsersTab() {
   );
 }
 
-function InvitesTab() {
+/** Invite links for the current workspace; in an organization, external emails can only be guests. */
+export function InvitesTab() {
   const qc = useQueryClient();
+  const ws = useCurrentUser().currentWorkspace!;
   const invites = useQuery({ queryKey: qk.adminInvites, queryFn: () => adminApi.invites().then((r) => r.data) });
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Role>('MEMBER');
   const [created, setCreated] = useState<Invite | null>(null);
+  const external = isExternal(ws, email.trim());
+  const effectiveRole: Role = external ? 'GUEST' : role;
   const create = useMutation({
-    mutationFn: () => adminApi.createInvite(email.trim(), role),
+    mutationFn: () => adminApi.createInvite(email.trim(), effectiveRole),
     onSuccess: (inv) => {
       setCreated(inv);
       setEmail('');
@@ -165,15 +192,26 @@ function InvitesTab() {
           </div>
           <div>
             <label htmlFor="inv-role" className="label">Role</label>
-            <select id="inv-role" className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-              <option value="MEMBER">Member</option>
-              <option value="ADMIN">Admin</option>
+            <select
+              id="inv-role"
+              className="input"
+              value={effectiveRole}
+              disabled={external}
+              aria-describedby={external ? 'inv-external' : undefined}
+              onChange={(e) => setRole(e.target.value as Role)}
+            >
+              <RoleOptions external={external} />
             </select>
           </div>
           <button type="submit" className="btn-primary py-2" disabled={!email.trim() || create.isPending}>
             Create invite link
           </button>
         </div>
+        {external && (
+          <p id="inv-external" className="mt-2 text-sm text-gray-600">
+            {email.trim().split('@')[1]} isn’t on {ws.domain}, so they’ll join {ws.name} as a guest.
+          </p>
+        )}
         {create.isError && <p role="alert" className="mt-2 text-sm text-red-600">{errorMessage(create.error)}</p>}
         {created && (
           <div role="status" className="mt-4 rounded-md bg-green-50 p-3 text-sm">
@@ -204,7 +242,7 @@ function InvitesTab() {
                 <li key={inv.id} className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm">
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">
-                      {inv.email} <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-normal text-gray-600">{inv.role === 'ADMIN' ? 'Admin' : 'Member'}</span>
+                      {inv.email} <span className="ml-1 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-normal text-gray-600">{ROLE_LABEL[inv.role]}</span>
                     </div>
                     <div className="text-xs text-gray-500">
                       Invited {timeAgo(inv.createdAt)}
@@ -224,33 +262,6 @@ function InvitesTab() {
           </ul>
         )}
       </section>
-    </div>
-  );
-}
-
-export function AdminPage() {
-  const [tab, setTab] = useState<'users' | 'invites'>('users');
-  return (
-    <div className="flex h-full flex-col">
-      <PageHeader title="Admin" icon={<ShieldIcon className="h-6 w-6 text-gray-500" />}>
-        <div role="tablist" aria-label="Admin sections" className="flex gap-4">
-          {(['users', 'invites'] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              role="tab"
-              aria-selected={tab === t}
-              onClick={() => setTab(t)}
-              className={clsx('-mb-px border-b-2 px-1 pb-2 text-sm', tab === t ? 'border-gray-900 font-medium' : 'border-transparent text-gray-500 hover:text-gray-800')}
-            >
-              {t === 'users' ? 'Users' : 'Invites'}
-            </button>
-          ))}
-        </div>
-      </PageHeader>
-      <div role="tabpanel" className="min-h-0 flex-1 overflow-y-auto p-6">
-        <div className="mx-auto max-w-4xl">{tab === 'users' ? <UsersTab /> : <InvitesTab />}</div>
-      </div>
     </div>
   );
 }

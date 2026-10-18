@@ -12,6 +12,7 @@ import { timeAgo } from '@/lib/dates';
 import { errorMessage } from '@/lib/errors';
 import { format } from 'date-fns';
 import { GuestBadge } from '../GuestBadge';
+import { invalidateMembershipViews } from './invalidate';
 import { isExternal, ROLE_LABEL } from './roles';
 
 
@@ -58,10 +59,7 @@ export function MembersTab() {
     mutationFn: ({ id, ...body }: { id: string; role?: Role; isActive?: boolean }) => adminApi.updateUser(id, body),
     onSuccess: (u) => {
       qc.setQueryData<User[]>(qk.adminUsers, (list) => list?.map((x) => (x.id === u.id ? u : x)));
-      // Pickers carry roles; project ownerships may have moved (W7) and member counts changed.
-      void qc.invalidateQueries({ queryKey: ['users'] });
-      void qc.invalidateQueries({ queryKey: ['project'] });
-      void qc.invalidateQueries({ queryKey: qk.me });
+      invalidateMembershipViews(qc);
     },
     meta: { quiet: true },
   });

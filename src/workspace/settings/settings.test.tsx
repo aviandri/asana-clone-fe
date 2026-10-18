@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
+import { setFetch } from '@/api/client';
+import { createMockFetch } from '@/mocks/backend';
 import type { MockDb } from '@/mocks/db';
 import { ADMIN, ALICE, BOB, GUEST, renderApp, setupMockApi } from '@/test/utils';
 import { getWorkspaceId } from '../workspaceId';
@@ -282,5 +284,133 @@ describe('deactivation copy', () => {
     const row = (await screen.findByText('Bob Brown')).closest('tr')!;
     await user().click(within(row).getByRole('button', { name: 'Deactivate' }));
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('lose access to Mekari'));
+  });
+});
+
+/** Serve the mock DB, but let `intercept` answer (or delay) chosen requests first. */
+function interceptApi(db: MockDb, intercept: (method: string, path: string) => Promise<Response | undefined> | Response | undefined) {
+  const inner = createMockFetch(() => db);
+  setFetch(async (input, init) => {
+    const hit = await intercept(init?.method ?? 'GET', new URL(input, 'http://x').pathname);
+    return hit ?? inner(input, init);
+  });
+}
+const fail500 = () => new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'Server exploded' } }), { status: 500 });
+
+describe('review fixes (#25)', () => {
+  /** alice in Acme, with Mekari freed of example.com so Acme can convert to it. */
+  function convertible() {
+    const db = aliceInAcme();
+    addExternalMember(db);
+    Object.assign(db.workspaces.find((w) => w.name === 'Mekari')!, { isOrganization: false, domain: null });
+    return db;
+  }
+
+  it('convert waits for the member list before saying who becomes a guest', async () => {
+    const db = convertible();
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    interceptApi(db, async (_method, path) => {
+      if (path === '/api/v1/admin/users') await held;
+      return undefined;
+    });
+    renderApp('/workspace/settings?tab=organization', { db });
+    const u = user();
+    await u.click(await screen.findByRole('button', { name: 'Convert to organization' }));
+    const dialog = await screen.findByRole('dialog', { name: /Convert to an organization/ });
+    expect(within(dialog).getByText('Checking who would become a guest…')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/no roles change/)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Convert' })).toBeDisabled();
+
+    release();
+    expect(await within(dialog).findByRole('list', { name: 'People who will become guests' })).toHaveTextContent('Zed Outsider');
+    expect(within(dialog).getByRole('button', { name: 'Convert' })).toBeEnabled();
+    expect(within(dialog).getByText(/Deactivated members and pending invites outside example\.com become guests too/)).toBeInTheDocument();
+  });
+
+  it('convert stays disabled if the member list fails to load', async () => {
+    const db = convertible();
+    interceptApi(db, (_method, path) => (path === '/api/v1/admin/users' ? fail500() : undefined));
+    renderApp('/workspace/settings?tab=organization', { db });
+    const u = user();
+    await u.click(await screen.findByRole('button', { name: 'Convert to organization' }));
+    const dialog = await screen.findByRole('dialog', { name: /Convert to an organization/ });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/Couldn’t load the member list/);
+    expect(within(dialog).getByRole('button', { name: 'Convert' })).toBeDisabled();
+    expect(db.workspaces.find((w) => w.name === 'Acme Pilot')!.isOrganization).toBe(false);
+  });
+
+  it('checks my own email is on the domain before confirming', async () => {
+    const db = convertible();
+    renderApp('/workspace/settings?tab=organization', { db });
+    const u = user();
+    const domain = await screen.findByRole('textbox', { name: 'Email domain' });
+    await u.clear(domain);
+    await u.type(domain, 'partner.test');
+    await u.click(screen.getByRole('button', { name: 'Convert to organization' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Your own email (alice@example.com) must be on partner.test');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(domain).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('a role change refetches teams and projects too (W4/W7)', async () => {
+    const db = aliceInAcme();
+    const { queryClient } = renderApp('/workspace/settings?tab=members', { db });
+    const spy = vi.spyOn(queryClient, 'invalidateQueries');
+    await user().selectOptions(await screen.findByRole('combobox', { name: 'Role for Bob Brown' }), 'GUEST');
+    await waitFor(() => expect(membership(db, 'Acme Pilot', BOB).role).toBe('GUEST'));
+    const keys = spy.mock.calls.map(([f]) => JSON.stringify(f?.queryKey));
+    for (const k of [['teams'], ['team'], ['projects'], ['project'], ['users'], ['adminUsers']]) expect(keys).toContain(JSON.stringify(k));
+  });
+
+  it('points a sole member to Delete instead of Leave', async () => {
+    const db = setupMockApi(ALICE);
+    const now = new Date().toISOString();
+    db.workspaces.push({ id: 'wksp-solo', name: 'Solo Lab', isOrganization: false, domain: null, color: '#4186e0', createdAt: now });
+    db.workspaceMembers.push({ workspaceId: 'wksp-solo', userId: userId(db, ALICE), role: 'ADMIN', isActive: true, joinedAt: now });
+    db.users.find((u) => u.email === ALICE)!.lastWorkspaceId = 'wksp-solo';
+    renderApp('/', { db });
+    const u = user();
+    await expectCurrent('Solo Lab');
+    await u.click(within(mainNav()).getByRole('button', { name: 'Workspace menu' }));
+    await u.click(screen.getByRole('menuitem', { name: 'Leave Solo Lab' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Leave Solo Lab?' });
+    expect(within(dialog).queryByRole('button', { name: 'Leave workspace' })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: 'Go to Danger zone' })).toHaveAttribute('href', '/workspace/settings?tab=danger');
+  });
+
+  it('clears a stale leave error when the dialog reopens', async () => {
+    const db = aliceInAcme();
+    renderApp('/workspace/settings', { db });
+    const u = user();
+    await u.click(await screen.findByRole('button', { name: 'Leave workspace' }));
+    let dialog = await screen.findByRole('dialog', { name: 'Leave Acme Pilot?' });
+    await u.click(within(dialog).getByRole('button', { name: 'Leave workspace' }));
+    expect(await within(dialog).findByRole('alert')).toBeInTheDocument();
+    await u.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await u.click(screen.getByRole('button', { name: 'Leave workspace' }));
+    dialog = await screen.findByRole('dialog', { name: 'Leave Acme Pilot?' });
+    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('after a delete, a failed /auth/me falls back to the lost-workspace reset', async () => {
+    const db = aliceInAcme();
+    let deleted = false;
+    let failedOnce = false;
+    interceptApi(db, (method, path) => {
+      if (method === 'DELETE' && path.startsWith('/api/v1/workspaces/')) deleted = true;
+      if (deleted && !failedOnce && path === '/api/v1/auth/me') {
+        failedOnce = true;
+        return fail500();
+      }
+      return undefined;
+    });
+    renderApp('/workspace/settings?tab=danger', { db });
+    const u = user();
+    await u.type(await screen.findByRole('textbox', { name: /to confirm/ }), 'Acme Pilot');
+    await u.click(screen.getByRole('button', { name: 'Delete workspace' }));
+    await expectCurrent('Mekari');
+    expect(failedOnce).toBe(true);
+    expect(getWorkspaceId()).toBe(wsId(db, 'Mekari'));
   });
 });

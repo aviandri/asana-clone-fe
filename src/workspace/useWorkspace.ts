@@ -114,7 +114,14 @@ export function useExitWorkspace() {
     async (message: string) => {
       seq++;
       pendingId = null;
-      const me = await authApi.me({ workspaceId: null });
+      let me: Me;
+      try {
+        me = await authApi.me({ workspaceId: null });
+      } catch {
+        // The workspace is gone either way; let the lost-workspace path retry and reset.
+        await recoverLostWorkspace(qc, navigate);
+        return;
+      }
       commit(qc, me);
       navigate('/');
       showToast(message, 'info');

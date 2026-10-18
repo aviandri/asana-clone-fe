@@ -44,3 +44,85 @@ jobs:
         run: |
           docker run --rm --add-host be:127.0.0.1 asana-clone-fe:ci \
             sh -c '/docker-entrypoint.d/20-envsubst-on-templates.sh && nginx -t'
+
+  e2e:
+    # Playwright e2e (e2e/) against a real stack: BE main (migrated + full seed) on :3000 and this
+    # commit's built FE served by `vite preview` on :4173, which proxies /api to :3000 like dev.
+    # Spec 09 (guests) stays skipped until E2E_GUESTS=1 is set here (after FE workspaces PR B).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: asana
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5433/asana
+      JWT_SECRET: ci-only-secret-at-least-16-chars
+      APP_URL: http://127.0.0.1:4173
+      APP_TIMEZONE: Asia/Jakarta
+      NODE_ENV: development
+      PORT: "3000"
+      HOST: 127.0.0.1
+      # Global setup plus the UI-login specs log in several times; leave headroom over 10/min.
+      AUTH_RATE_LIMIT_MAX: "100"
+      E2E_BASE_URL: http://127.0.0.1:4173
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: aviandri/asana-clone-be
+          # github.token can only read this repo; if asana-clone-be is private, add a fine-grained
+          # read-only PAT (Contents: read on asana-clone-be) as the BE_REPO_TOKEN secret.
+          token: ${{ secrets.BE_REPO_TOKEN || github.token }}
+          ref: main
+          path: be
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            be/package-lock.json
+      - name: Backend (migrate, build, seed, start)
+        working-directory: be
+        run: |
+          npm ci
+          npx prisma migrate deploy
+          npm run build
+          npm run seed
+          nohup npm start > ../be.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:3000/health >/dev/null && exit 0; sleep 1; done
+          echo "backend did not become healthy"; cat ../be.log; exit 1
+      - name: Frontend (build, serve)
+        run: |
+          npm ci
+          npm run build
+          nohup npx vite preview --port 4173 --strictPort --host 127.0.0.1 > fe.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/ >/dev/null && exit 0; sleep 1; done
+          echo "vite preview did not start"; cat fe.log; exit 1
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7
+      - name: Backend and frontend logs
+        if: always()
+        run: |
+          cat be.log || true
+          cat fe.log || true

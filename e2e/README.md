@@ -22,6 +22,13 @@ npx playwright install chromium
 # against another deployment, e.g. the compose stack:
 E2E_BASE_URL=http://localhost:8080 npm run e2e
 ```
+### In CI
+The FE `e2e` job (`.github/workflows/ci.yml`) runs this suite on every PR and on pushes to main:
+- BE `main`, migrated and full-seeded on a Postgres service, on :3000;
+- this commit's built FE, served by `vite preview` on :4173 (proxies `/api`);
+- `npx playwright install --with-deps chromium`.
+On failure, the HTML report and traces are uploaded as the `playwright-report` artifact.
+
 Global setup logs in once as the seed admin (login is rate-limited to 10/min per IP) and every
 spec reuses that session, except `01-auth`, which starts logged out. Specs create their own uniquely named projects through the API and delete them afterwards, so
 they can run repeatedly against the same seeded DB. On failure, traces land in

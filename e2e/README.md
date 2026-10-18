@@ -2,7 +2,9 @@
 
 Seven specs covering the golden path: login/logout, create project, add task (list view), move a
 task across board columns (drag and drop), comment on a task, and for v1.1 create an aligned goal
-and update a key result, then open the project Dashboard and export CSV. Chromium only, `workers: 1`.
+and update a key result, then open the project Dashboard and export CSV.
+Chromium only, `workers: 1`, `reducedMotion: 'reduce'` (the UI animates; this keeps assertions and
+drag-and-drop from racing transitions).
 
 ## Running locally
 ```sh

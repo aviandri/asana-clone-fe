@@ -26,6 +26,9 @@ export default defineConfig({
     baseURL,
     // Logged in as the seed admin by default; 01-auth opts out.
     storageState: STORAGE_STATE,
+    // Mekari Project's UI animates (Slack-style transitions); reduced motion keeps assertions and
+    // drag positions from racing animations.
+    contextOptions: { reducedMotion: 'reduce' },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',

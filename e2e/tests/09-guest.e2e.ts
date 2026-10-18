@@ -1,6 +1,8 @@
 import { ACME, GUEST, expect, loginViaUi, test } from '../fixtures';
 
 // SPEC §12 guest experience: guest@partner.test is a GUEST in Acme Pilot, on "Pilot Rollout" only.
+// v1.2 (SPEC §12) isn't on main yet; opt in with E2E_WORKSPACES=1 once the workspace PRs land.
+test.skip(!process.env.E2E_WORKSPACES, 'needs SPEC §12 workspaces (set E2E_WORKSPACES=1)');
 test.use({ storageState: { cookies: [], origins: [] } });
 
 test('a guest sees only their project and no member-only features', async ({ page }) => {

@@ -4,6 +4,7 @@ Nine specs covering the golden path: login/logout, create project, add task (lis
 task across board columns (drag and drop), comment on a task, and for v1.1 create an aligned goal
 and update a key result, then open the project Dashboard and export CSV. For v1.2: switch
 workspace (menu, rail, shortcuts, deep link) and the guest experience.
+Specs are named `*.e2e.ts` (not `*.spec.ts`) so vitest's default glob in `npm test` skips them.
 Chromium only, `workers: 1`, `reducedMotion: 'reduce'` (the UI animates; this keeps assertions and
 drag-and-drop from racing transitions).
 
@@ -55,6 +56,6 @@ The tests use accessible roles and names, not CSS classes or test ids. The UI mu
 | Guest | sidebar | text `Guest` (exact) and `You're a guest in <name>` inside Main nav; no `Goals` link, no `Browse` (teams) link, no `New project` button; `/reporting` has no `Workload` link |
 
 Everything up to the v1.1 rows is implemented on FE `main`. The v1.2 rows (specs 08–09) are the
-proposed contract for the workspace screens (SPEC §12), which aren't built yet; they need the full
+proposed contract for the workspace screens (SPEC §12), which aren't built yet; they're skipped unless `E2E_WORKSPACES=1` is set, and they need the full
 seed (`Mekari` + `Acme Pilot` + `guest@partner.test`). If the UI ends up differing, update the spec
 selectors in the same PR.

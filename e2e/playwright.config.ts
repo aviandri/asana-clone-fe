@@ -12,6 +12,8 @@ const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:5173';
 
 export default defineConfig({
   testDir: './tests',
+  // Not *.spec.ts: vitest's default include would pick those up in `npm test`.
+  testMatch: '**/*.e2e.ts',
   globalSetup: './global-setup.ts',
   outputDir: './test-results',
   fullyParallel: false,

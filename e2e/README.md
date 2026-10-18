@@ -61,8 +61,12 @@ The tests use accessible roles and names, not CSS classes or test ids. The UI mu
 | | toast | `role="status"` containing `Switched to <name>` (also after a deep-link switch) |
 | Workspace rail | rail | `<nav aria-label="Workspaces">` (only with ≥ 2 workspaces); a button per workspace named by its name, `aria-current="true"` on the current one; `Ctrl/⌘+n` = n-th tile in `Me.workspaces` order |
 | Guest | sidebar | text `Guest` (exact) and `You're a guest in <name>` inside Main nav; no `Goals` link, no `Browse` (teams) link, no `New project` button; `/reporting` has no `Workload` link |
+| Workspace settings | entry | `menuitem` `Workspace settings` in the workspace menu (ADMIN only) → `/workspace/settings` |
+| | tabs | `role="tablist"` named `Workspace settings sections`; `role="tab"` buttons `General`, `Organization`, `Members`, `Invites`, `Danger zone`, `aria-selected="true"` on the current one; current tab in `?tab=` (`general`, `organization`, `members`, `invites`, `danger`); `role="tabpanel"` named by the tab label |
+| Leave workspace | entry | `menuitem` `Leave <workspace name>` in the workspace menu |
+| | confirm | `role="dialog"` named `Leave <workspace name>?` with button `Leave workspace` |
 
-The v1.2 switcher and rail rows (spec 08) match FE workspaces PR A and need the full seed
-(`Mekari` + `Acme Pilot`). The guest row (spec 09) is still a proposal for PR B: it's skipped
-unless `E2E_GUESTS=1` is set, and it needs `guest@partner.test` in the seed. If the UI ends up
-differing, update the spec selectors in the same PR.
+The v1.2 rows match FE workspaces PR A (switcher and rail, checked by spec 08) and PR B (guest,
+checked by spec 09; the settings and leave rows are documented from PR B's markup but no spec
+exercises them yet). The specs need the full seed (`Mekari` + `Acme Pilot` + `guest@partner.test`).
+If the UI changes, update the spec selectors in the same PR.

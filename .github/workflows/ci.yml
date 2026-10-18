@@ -48,7 +48,6 @@ jobs:
   e2e:
     # Playwright e2e (e2e/) against a real stack: BE main (migrated + full seed) on :3000 and this
     # commit's built FE served by `vite preview` on :4173, which proxies /api to :3000 like dev.
-    # Spec 09 (guests) stays skipped until E2E_GUESTS=1 is set here (after FE workspaces PR B).
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:

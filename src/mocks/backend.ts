@@ -8,6 +8,7 @@ import type {
 } from '@/api/types';
 import { goalRoutes } from './goals';
 import { reportRoutes } from './reports';
+import { workspaceRoutes } from './workspaces';
 import { uid, type MockDb, type ProjectRow, type TaskRow, type UserRow } from './db';
 
 import {
@@ -18,6 +19,18 @@ import {
   nowIso,
   summary,
   fullUser,
+  memberUser,
+  serializeMe,
+  membershipOf,
+  roleIn,
+  activeMembers,
+  resolveWorkspace,
+  assertWorkspaceMember,
+  removeFromWorkspace,
+  assertNotLastAdmin,
+  onDomain,
+  forbidGuest,
+  visibleTeam,
   userById,
   serializeTeam,
   serializeTeamDetail,
@@ -57,8 +70,11 @@ function notify(
   type: Notification['type'],
 ) {
   if (userId === actorId) return;
+  const workspaceId = db.tasks.find((t) => t.id === taskId)?.workspaceId;
+  if (!workspaceId) return;
   db.notifications.push({
     id: uid(db, 'ntfy'),
+    workspaceId,
     userId,
     actorId,
     taskId,
@@ -107,7 +123,10 @@ function applyTaskPatch(db: MockDb, t: TaskRow, body: Record<string, unknown>, m
   }
   if ('projectId' in body) {
     const pid = body.projectId as string | null;
-    if (pid) visibleProject(db, pid, me);
+    if (pid && visibleProject(db, pid, me).workspaceId !== t.workspaceId) {
+      const message = 'Tasks can’t move to a project in another workspace';
+      throw new HttpError(400, 'VALIDATION', message, [{ path: ['projectId'], message }]);
+    }
     t.projectId = pid;
     if (pid !== prev.projectId && !('sectionId' in body)) t.sectionId = null;
   }
@@ -205,6 +224,7 @@ function serializeInvite(db: MockDb, i: MockDb['invites'][number]): Invite {
   const inviter = db.users.find((u) => u.id === i.invitedById);
   return {
     id: i.id,
+    workspaceId: i.workspaceId,
     email: i.email,
     role: i.role,
     token: i.token,
@@ -226,6 +246,20 @@ function usableInvite(db: MockDb, token: string) {
 
 const bool = (v: string | null) => (v === null ? undefined : v === 'true');
 
+const ROLES = ['ADMIN', 'MEMBER', 'GUEST'];
+const EXTERNAL_GUEST = 'External people can only be guests';
+
+/** /users and the @mention picker: active members; a guest only sees people they share a project with. */
+function pickableUsers(db: MockDb, workspaceId: string, me: UserRow, role: string) {
+  const ids = new Set(activeMembers(db, workspaceId).map((m) => m.userId));
+  if (role === 'GUEST') {
+    const mine = new Set(db.projectMembers.filter((m) => m.userId === me.id).map((m) => m.projectId));
+    const shared = new Set(db.projectMembers.filter((m) => mine.has(m.projectId)).map((m) => m.userId));
+    for (const id of ids) if (!shared.has(id) && id !== me.id) ids.delete(id);
+  }
+  return db.users.filter((u) => u.isActive && ids.has(u.id));
+}
+
 // ---------- routes ----------
 
 const routes: [string, string, Handler, { public?: boolean }?][] = [
@@ -235,7 +269,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'POST',
     '/auth/login',
-    ({ db, body }) => {
+    ({ db, body, header }) => {
       const email = String(body?.email ?? '').toLowerCase();
       const failures = (db.loginFailures ??= {});
       if ((failures[email] ?? 0) >= LOGIN_ATTEMPT_LIMIT)
@@ -247,7 +281,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       }
       delete failures[email];
       db.sessionUserId = u.id;
-      return fullUser(u);
+      return serializeMe(db, u, resolveWorkspace(db, u, header, true));
     },
     { public: true },
   ],
@@ -260,13 +294,20 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     },
     { public: true },
   ],
-  ['GET', '/auth/me', ({ me }) => fullUser(me!)],
+  ['GET', '/auth/me', ({ db, me, wsOrNull }) => serializeMe(db, me!, wsOrNull())],
   [
     'GET',
     '/auth/invites/:token',
     ({ db, params }) => {
       const inv = usableInvite(db, params.token);
-      return { email: inv.email, role: inv.role };
+      const w = db.workspaces.find((x) => x.id === inv.workspaceId)!;
+      return {
+        id: inv.id,
+        email: inv.email,
+        role: inv.role,
+        workspace: { id: w.id, name: w.name, color: w.color },
+        existingUser: db.users.some((u) => u.email === inv.email),
+      };
     },
     { public: true },
   ],
@@ -279,21 +320,23 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       const password = String(body?.password ?? '');
       if (!name) throw invalid('name is required');
       if (password.length < 8) throw invalid('Password must be at least 8 characters');
-      if (db.users.some((u) => u.email === inv.email)) throw new HttpError(409, 'CONFLICT', 'User exists');
+      // New users only; an existing account logs in and accepts via /me/invites/:id/accept.
+      if (db.users.some((u) => u.email === inv.email)) throw new HttpError(409, 'CONFLICT', 'An account with this email already exists');
       const u: UserRow = {
         id: uid(db, 'user'),
         email: inv.email,
         name,
         password,
-        role: inv.role,
         isActive: true,
         avatarColor: '#9ee7e3',
         createdAt: nowIso(),
+        lastWorkspaceId: inv.workspaceId,
       };
       db.users.push(u);
+      db.workspaceMembers.push({ workspaceId: inv.workspaceId, userId: u.id, role: inv.role, isActive: true, joinedAt: nowIso() });
       inv.acceptedAt = nowIso();
       db.sessionUserId = u.id;
-      return fullUser(u);
+      return serializeMe(db, u, db.workspaces.find((w) => w.id === inv.workspaceId)!);
     },
     { public: true },
   ],
@@ -302,59 +345,78 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'GET',
     '/users',
-    ({ db, query }) => {
+    ({ db, me, ws, role, query }) => {
       const q = (query.get('q') ?? '').toLowerCase();
       return {
-        data: db.users
-          .filter((u) => u.isActive)
+        data: pickableUsers(db, ws().id, me!, role())
           .filter((u) => !q || u.name.toLowerCase().includes(q) || u.email.includes(q))
           .map(summary),
       };
     },
   ],
-  ['GET', '/users/:id', ({ db, params }) => fullUser(userById(db, params.id))],
+  ['GET', '/users/:id', ({ db, params, wsOrNull }) => fullUser(db, userById(db, params.id), wsOrNull())],
   [
     'PATCH',
     '/users/me',
-    ({ me, body }) => {
+    ({ db, me, body, wsOrNull }) => {
       if (body.newPassword) {
         if (body.currentPassword !== me!.password) throw invalid('Current password is incorrect');
         me!.password = body.newPassword;
       }
       if (body.name !== undefined) me!.name = String(body.name);
       if (body.avatarColor !== undefined) me!.avatarColor = String(body.avatarColor);
-      return fullUser(me!);
+      return fullUser(db, me!, wsOrNull());
     },
   ],
 
-  // admin
+  // admin (members and invites of the current workspace)
   [
     'GET',
     '/admin/users',
-    ({ db, me }) => {
-      requireAdmin(me!);
-      return { data: db.users.map(fullUser) };
+    ({ db, ws, role }) => {
+      requireAdmin(role());
+      return {
+        data: db.workspaceMembers
+          .filter((m) => m.workspaceId === ws().id)
+          .map((m) => memberUser(userById(db, m.userId), m))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      };
     },
   ],
   [
     'PATCH',
     '/admin/users/:id',
-    ({ db, me, params, body }) => {
-      requireAdmin(me!);
-      const u = userById(db, params.id);
-      if (body.role !== undefined) u.role = body.role;
-      if (body.isActive !== undefined) u.isActive = !!body.isActive;
-      return fullUser(u);
+    ({ db, me, ws, role, params, body }) => {
+      requireAdmin(role());
+      const w = ws();
+      const m = membershipOf(db, w.id, params.id);
+      if (!m) throw notFound();
+      const u = userById(db, m.userId);
+      const demoting = body.role !== undefined && body.role !== 'ADMIN';
+      const deactivating = body.isActive === false;
+      if (m.role === 'ADMIN' && m.isActive && (demoting || deactivating)) assertNotLastAdmin(db, w.id);
+      if (body.role !== undefined) {
+        if (!ROLES.includes(body.role)) throw invalid('bad role');
+        if (w.isOrganization && body.role !== 'GUEST' && !onDomain(u.email, w.domain)) {
+          throw new HttpError(400, 'VALIDATION', EXTERNAL_GUEST, [{ path: ['role'], message: EXTERNAL_GUEST }]);
+        }
+        m.role = body.role;
+      }
+      if (body.isActive !== undefined) {
+        if (m.isActive && !body.isActive) removeFromWorkspace(db, w.id, m.userId, me!.id);
+        m.isActive = !!body.isActive;
+      }
+      return memberUser(u, m);
     },
   ],
   [
     'GET',
     '/admin/invites',
-    ({ db, me }) => {
-      requireAdmin(me!);
+    ({ db, ws, role }) => {
+      requireAdmin(role());
       return {
         data: db.invites
-          .filter((i) => !i.acceptedAt)
+          .filter((i) => i.workspaceId === ws().id && !i.acceptedAt)
           .map((i) => serializeInvite(db, i)),
       };
     },
@@ -362,16 +424,26 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'POST',
     '/admin/invites',
-    ({ db, me, body }) => {
-      requireAdmin(me!);
+    ({ db, me, ws, role, body }) => {
+      requireAdmin(role());
+      const w = ws();
       const email = String(body?.email ?? '').trim().toLowerCase();
       if (!/^\S+@\S+\.\S+$/.test(email)) throw invalid('Invalid email');
-      if (db.users.some((u) => u.email === email)) throw new HttpError(409, 'CONFLICT', 'User already exists');
+      const inviteRole = body.role ?? 'MEMBER';
+      if (!ROLES.includes(inviteRole)) throw invalid('bad role');
+      if (w.isOrganization && inviteRole !== 'GUEST' && !onDomain(email, w.domain)) {
+        throw new HttpError(400, 'VALIDATION', EXTERNAL_GUEST, [{ path: ['role'], message: EXTERNAL_GUEST }]);
+      }
+      const existing = db.users.find((u) => u.email === email);
+      if (existing && roleIn(db, w.id, existing.id)) throw new HttpError(409, 'CONFLICT', 'Already a member of this workspace');
+      if (db.invites.some((i) => i.workspaceId === w.id && i.email === email && !i.acceptedAt))
+        throw new HttpError(409, 'CONFLICT', 'There is already a pending invite for this email');
       const token = uid(db, 'tokn').replace(/-/g, '');
       const inv = {
         id: uid(db, 'invt'),
+        workspaceId: w.id,
         email,
-        role: body.role ?? 'MEMBER',
+        role: inviteRole,
         token,
         invitedById: me!.id,
         expiresAt: new Date(Date.now() + 7 * 864e5).toISOString(),
@@ -385,9 +457,9 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'DELETE',
     '/admin/invites/:id',
-    ({ db, me, params }) => {
-      requireAdmin(me!);
-      db.invites = db.invites.filter((i) => i.id !== params.id);
+    ({ db, ws, role, params }) => {
+      requireAdmin(role());
+      db.invites = db.invites.filter((i) => !(i.id === params.id && i.workspaceId === ws().id));
       return { status: 204 };
     },
   ],
@@ -396,10 +468,12 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'GET',
     '/teams',
-    ({ db, me, query }) => {
+    ({ db, me, ws, query }) => {
       const mine = query.get('mine') === 'true';
+      const wsId = ws().id;
       return {
         data: db.teams
+          .filter((t) => t.workspaceId === wsId)
           .filter((t) => !mine || db.teamMembers.some((m) => m.teamId === t.id && m.userId === me!.id))
           .map((t) => serializeTeam(db, t)),
       };
@@ -408,10 +482,11 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'POST',
     '/teams',
-    ({ db, me, body }) => {
+    ({ db, me, ws, role, body }) => {
+      forbidGuest(role());
       const name = String(body?.name ?? '').trim();
       if (!name) throw invalid('name is required');
-      const t = { id: uid(db, 'team'), name, description: body.description ?? null, createdAt: nowIso() };
+      const t = { id: uid(db, 'team'), workspaceId: ws().id, name, description: body.description ?? null, createdAt: nowIso() };
       db.teams.push(t);
       db.teamMembers.push({ teamId: t.id, userId: me!.id });
       return { status: 201, body: serializeTeamDetail(db, t) };
@@ -420,20 +495,15 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'GET',
     '/teams/:id',
-    ({ db, params }) => {
-      const t = db.teams.find((x) => x.id === params.id);
-      if (!t) throw notFound();
-      return serializeTeamDetail(db, t);
-    },
+    ({ db, me, params }) => serializeTeamDetail(db, visibleTeam(db, params.id, me!)),
   ],
   [
     'PATCH',
     '/teams/:id',
     ({ db, me, params, body }) => {
-      const t = db.teams.find((x) => x.id === params.id);
-      if (!t) throw notFound();
+      const t = visibleTeam(db, params.id, me!);
       const isMember = db.teamMembers.some((m) => m.teamId === t.id && m.userId === me!.id);
-      if (!isMember && me!.role !== 'ADMIN') throw forbidden();
+      if (!isMember && roleIn(db, t.workspaceId, me!.id) !== 'ADMIN') throw forbidden();
       if (body.name !== undefined) t.name = String(body.name);
       if (body.description !== undefined) t.description = body.description;
       return serializeTeamDetail(db, t);
@@ -443,7 +513,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     'DELETE',
     '/teams/:id',
     ({ db, me, params }) => {
-      requireAdmin(me!);
+      requireAdmin(roleIn(db, visibleTeam(db, params.id, me!).workspaceId, me!.id));
       if (db.projects.some((p) => p.teamId === params.id))
         throw new HttpError(409, 'CONFLICT', 'Team still has projects');
       db.teams = db.teams.filter((t) => t.id !== params.id);
@@ -454,10 +524,9 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'POST',
     '/teams/:id/members',
-    ({ db, params, body }) => {
-      const t = db.teams.find((x) => x.id === params.id);
-      if (!t) throw notFound();
-      userById(db, body.userId);
+    ({ db, me, params, body }) => {
+      const t = visibleTeam(db, params.id, me!);
+      assertWorkspaceMember(db, t.workspaceId, String(body?.userId ?? ''), 'userId', { noGuests: true });
       if (!db.teamMembers.some((m) => m.teamId === t.id && m.userId === body.userId))
         db.teamMembers.push({ teamId: t.id, userId: body.userId });
       return serializeTeamDetail(db, t);
@@ -466,9 +535,8 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'DELETE',
     '/teams/:id/members/:userId',
-    ({ db, params }) => {
-      const t = db.teams.find((x) => x.id === params.id);
-      if (!t) throw notFound();
+    ({ db, me, params }) => {
+      const t = visibleTeam(db, params.id, me!);
       db.teamMembers = db.teamMembers.filter((m) => !(m.teamId === t.id && m.userId === params.userId));
       return serializeTeamDetail(db, t);
     },
@@ -478,13 +546,14 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'GET',
     '/projects',
-    ({ db, me, query }) => {
+    ({ db, me, ws, query }) => {
       const teamId = query.get('teamId');
       const archived = bool(query.get('archived'));
       const q = (query.get('q') ?? '').toLowerCase();
+      const wsId = ws().id;
       return {
         data: db.projects
-          .filter((p) => canSeeProject(db, p, me!))
+          .filter((p) => p.workspaceId === wsId && canSeeProject(db, p, me!))
           .filter((p) => !teamId || p.teamId === teamId)
           .filter((p) => archived === undefined || p.archived === archived)
           .filter((p) => !q || p.name.toLowerCase().includes(q))
@@ -495,14 +564,17 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'POST',
     '/projects',
-    ({ db, me, body }) => {
+    ({ db, me, ws, role, body }) => {
+      forbidGuest(role());
       const name = String(body?.name ?? '').trim();
       if (!name) throw invalid('name is required');
-      if (!db.teams.some((t) => t.id === body.teamId)) throw invalid('teamId is invalid');
+      const w = ws();
+      if (!db.teams.some((t) => t.id === body.teamId && t.workspaceId === w.id)) throw invalid('teamId is invalid');
       const inTeam = db.teamMembers.some((m) => m.teamId === body.teamId && m.userId === me!.id);
-      if (!inTeam && me!.role !== 'ADMIN') throw forbidden();
+      if (!inTeam && role() !== 'ADMIN') throw forbidden();
       const p: ProjectRow = {
         id: uid(db, 'proj'),
+        workspaceId: w.id,
         teamId: body.teamId,
         ownerId: me!.id,
         name,
@@ -555,7 +627,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     ({ db, me, params, body }) => {
       const p = visibleProject(db, params.id, me!);
       assertProjectOwner(db, p, me!);
-      userById(db, body.userId);
+      assertWorkspaceMember(db, p.workspaceId, String(body?.userId ?? ''), 'userId');
       const existing = db.projectMembers.find((m) => m.projectId === p.id && m.userId === body.userId);
       if (existing?.role === 'OWNER' && body.role !== 'OWNER') assertNotLastOwner(db, p.id);
       if (existing) existing.role = body.role;
@@ -654,11 +726,12 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'GET',
     '/me/tasks',
-    ({ db, me, query }) => {
+    ({ db, me, ws, query }) => {
       const completed = bool(query.get('completed'));
+      const wsId = ws().id;
       return {
         data: db.tasks
-          .filter((t) => t.assigneeId === me!.id && (completed === undefined || t.completed === completed))
+          .filter((t) => t.workspaceId === wsId && t.assigneeId === me!.id && (completed === undefined || t.completed === completed))
           .filter((t) => canSeeTask(db, t, me!))
           .sort((a, b) => a.position - b.position)
           .map((t) => serializeTask(db, t)),
@@ -668,20 +741,28 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'POST',
     '/tasks',
-    ({ db, me, body }) => {
+    ({ db, me, ws, body }) => {
       const title = String(body?.title ?? '').trim();
       if (!title) throw invalid('title is required');
       let projectId: string | null = body.projectId ?? null;
+      // A subtask / project task lives in its parent's / project's workspace; a personal task in the current one.
+      let workspaceId: string | null = null;
       if (body.parentId) {
         const parent = visibleTask(db, body.parentId, me!);
         projectId = parent.projectId;
+        workspaceId = parent.workspaceId;
       }
-      if (projectId) assertCanEditProjectContent(db, visibleProject(db, projectId, me!), me!);
+      if (projectId) {
+        const p = visibleProject(db, projectId, me!);
+        assertCanEditProjectContent(db, p, me!);
+        workspaceId = p.workspaceId;
+      }
       const siblings = db.tasks.filter((t) =>
         body.parentId ? t.parentId === body.parentId : t.projectId === projectId && t.sectionId === (body.sectionId ?? null),
       );
       const t: TaskRow = {
         id: uid(db, 'task'),
+        workspaceId: workspaceId ?? ws().id,
         projectId,
         sectionId: body.parentId ? null : (body.sectionId ?? null),
         parentId: body.parentId ?? null,
@@ -767,6 +848,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       const t = visibleTask(db, params.id, me!);
       const text = String(body?.body ?? '').trim();
       if (!text) throw invalid('body is required');
+      mentionedIds(text).forEach((id) => assertWorkspaceMember(db, t.workspaceId, id, 'body'));
       const c = { id: uid(db, 'cmnt'), taskId: t.id, authorId: me!.id, body: text, createdAt: nowIso(), editedAt: null };
       db.comments.push(c);
       follow(db, t.id, me!.id);
@@ -796,7 +878,8 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     ({ db, me, params }) => {
       const c = db.comments.find((x) => x.id === params.id);
       if (!c) throw notFound();
-      if (c.authorId !== me!.id && me!.role !== 'ADMIN') throw forbidden();
+      const t = db.tasks.find((x) => x.id === c.taskId);
+      if (c.authorId !== me!.id && !(t && roleIn(db, t.workspaceId, me!.id) === 'ADMIN')) throw forbidden();
       db.comments = db.comments.filter((x) => x.id !== c.id);
       return { status: 204 };
     },
@@ -806,10 +889,11 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'GET',
     '/notifications',
-    ({ db, me, query }) => {
+    ({ db, me, ws, query }) => {
       const unread = query.get('unread') === 'true';
       const limit = Number(query.get('limit') ?? 50);
-      const mine = db.notifications.filter((n) => n.userId === me!.id);
+      const wsId = ws().id;
+      const mine = db.notifications.filter((n) => n.userId === me!.id && n.workspaceId === wsId);
       const data: Notification[] = mine
         .filter((n) => !unread || !n.read)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
@@ -818,6 +902,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
           const task = n.taskId ? db.tasks.find((t) => t.id === n.taskId) : null;
           return {
             id: n.id,
+            workspaceId: n.workspaceId,
             type: n.type,
             read: n.read,
             createdAt: n.createdAt,
@@ -831,9 +916,10 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'POST',
     '/notifications/read-all',
-    ({ db, me }) => {
+    ({ db, me, ws }) => {
+      const wsId = ws().id;
       db.notifications.forEach((n) => {
-        if (n.userId === me!.id) n.read = true;
+        if (n.userId === me!.id && n.workspaceId === wsId) n.read = true;
       });
       return { status: 204 };
     },
@@ -853,20 +939,21 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   [
     'GET',
     '/search',
-    ({ db, me, query }) => {
+    ({ db, me, ws, role, query }) => {
       const q = (query.get('q') ?? '').trim().toLowerCase();
       if (q.length < 2) throw invalid('q must be at least 2 characters');
+      const wsId = ws().id;
       return {
         tasks: db.tasks
-          .filter((t) => t.title.toLowerCase().includes(q) && canSeeTask(db, t, me!))
+          .filter((t) => t.workspaceId === wsId && t.title.toLowerCase().includes(q) && canSeeTask(db, t, me!))
           .slice(0, 10)
           .map((t) => serializeTask(db, t)),
         projects: db.projects
-          .filter((p) => p.name.toLowerCase().includes(q) && canSeeProject(db, p, me!))
+          .filter((p) => p.workspaceId === wsId && p.name.toLowerCase().includes(q) && canSeeProject(db, p, me!))
           .slice(0, 10)
           .map((p) => serializeProject(db, p, me!)),
-        users: db.users
-          .filter((u) => u.isActive && (u.name.toLowerCase().includes(q) || u.email.includes(q)))
+        users: pickableUsers(db, wsId, me!, role())
+          .filter((u) => u.name.toLowerCase().includes(q) || u.email.includes(q))
           .slice(0, 10)
           .map(summary),
       };
@@ -874,7 +961,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   ],
 ];
 
-const compiled = [...routes, ...goalRoutes, ...reportRoutes].map(([method, pattern, handler, opts]) => {
+const compiled = [...routes, ...workspaceRoutes, ...goalRoutes, ...reportRoutes].map(([method, pattern, handler, opts]) => {
   const keys: string[] = [];
   const re = new RegExp(
     '^' +
@@ -896,6 +983,7 @@ export function handleMockRequest(
   path: string,
   query: URLSearchParams,
   body: unknown,
+  headers: { workspaceId?: string | null } = {},
 ): MockResponse {
   try {
     const route = compiled.find((r) => r.method === method && r.re.test(path));
@@ -904,7 +992,20 @@ export function handleMockRequest(
     const params = Object.fromEntries(route.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
     const me = db.users.find((u) => u.id === db.sessionUserId && u.isActive) ?? null;
     if (!route.isPublic && !me) throw new HttpError(401, 'UNAUTHORIZED', 'Not authenticated');
-    const out = route.handler({ db, method, params, query, body, me });
+    const header = headers.workspaceId ?? null;
+    const ws = () => resolveWorkspace(db, me!, header)!;
+    const out = route.handler({
+      db,
+      method,
+      params,
+      query,
+      body,
+      me,
+      header,
+      ws,
+      role: () => roleIn(db, ws().id, me!.id)!,
+      wsOrNull: () => (me ? resolveWorkspace(db, me, header, true) : null),
+    });
     if (out && typeof out === 'object' && 'status' in out && typeof out.status === 'number') {
       return out as Result;
     }
@@ -933,7 +1034,8 @@ export function createMockFetch(
     const body = typeof init?.body === 'string' && init.body ? JSON.parse(init.body) : undefined;
     if (opts.latencyMs) await new Promise((r) => setTimeout(r, opts.latencyMs));
     const db = getDb();
-    const res = handleMockRequest(db, method, path, url.searchParams, body);
+    const workspaceId = new Headers(init?.headers).get('X-Workspace-Id');
+    const res = handleMockRequest(db, method, path, url.searchParams, body, { workspaceId });
     if (method !== 'GET') opts.onChange?.(db);
     // Clone through JSON so callers can't mutate DB rows by reference.
     if (res.raw !== undefined) {

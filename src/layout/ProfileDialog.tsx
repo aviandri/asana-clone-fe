@@ -2,12 +2,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import { usersApi } from '@/api/endpoints';
 import { qk } from '@/api/queryKeys';
+import type { Me } from '@/api/types';
 import { useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
 import { ColorPicker } from '@/components/ColorPicker';
 import { Modal } from '@/components/Modal';
 import { setCelebrationsEnabled, useCelebrationsEnabled } from '@/lib/celebrations';
 import { errorMessage } from '@/lib/errors';
+import { WorkspaceMenuContent } from '@/workspace/WorkspaceMenu';
 
 /** Saved immediately (per device, localStorage) — independent of the profile Save button. */
 function CelebrationsToggle() {
@@ -30,7 +32,7 @@ function CelebrationsToggle() {
   );
 }
 
-export function ProfileDialog({ onClose }: { onClose: () => void }) {
+export function ProfileDialog({ onClose, onCreateWorkspace }: { onClose: () => void; onCreateWorkspace: () => void }) {
   const me = useCurrentUser();
   const qc = useQueryClient();
   const [name, setName] = useState(me.name);
@@ -41,7 +43,8 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
   const save = useMutation({
     mutationFn: usersApi.updateMe,
     onSuccess: (u) => {
-      qc.setQueryData(qk.me, u);
+      // PATCH /users/me returns a User; keep the workspace fields of Me.
+      qc.setQueryData<Me>(qk.me, (prev) => (prev ? { ...prev, ...u } : prev));
       void qc.invalidateQueries({ queryKey: ['users'] });
       onClose();
     },
@@ -76,6 +79,9 @@ export function ProfileDialog({ onClose }: { onClose: () => void }) {
           <ColorPicker value={color} onChange={setColor} />
         </fieldset>
         <CelebrationsToggle />
+        <section aria-label="Workspaces" className="rounded-lg border border-gray-200 p-1">
+          <WorkspaceMenuContent label="Your workspaces" onDone={onClose} onCreate={onCreateWorkspace} />
+        </section>
         <fieldset className="space-y-2 rounded-lg border border-gray-200 p-3">
           <legend className="px-1 text-sm font-medium text-gray-700">Change password</legend>
           <input aria-label="Current password" type="password" autoComplete="current-password" placeholder="Current password" className="input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />

@@ -5,8 +5,9 @@ import { useNotifications, useProjects, useTeams } from '@/api/hooks';
 import type { Project, Team } from '@/api/types';
 import { useAuth, useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
-import { MekariLockup } from '@/components/brand/Brand';
 import { NewProjectDialog } from '@/projects/NewProjectDialog';
+import { CreateWorkspaceDialog } from '@/workspace/CreateWorkspaceDialog';
+import { WorkspaceSwitcher } from '@/workspace/WorkspaceSwitcher';
 import { ProfileDialog } from './ProfileDialog';
 import {
   BellIcon,
@@ -118,6 +119,7 @@ export function Sidebar() {
   const unread = notifications.data?.unreadCount;
   const [newProject, setNewProject] = useState(false);
   const [profile, setProfile] = useState(false);
+  const [creatingWs, setCreatingWs] = useState(false);
 
   const groups = useMemo(() => {
     const byTeam = new Map<string, Project[]>();
@@ -132,9 +134,7 @@ export function Sidebar() {
 
   return (
     <nav aria-label="Main" className="flex h-full flex-col bg-sidebar text-sidebar-text">
-      <Link to="/" className={clsx('mx-2 mb-2 mt-3 flex h-10 items-center rounded-md px-2', focusRing)} aria-label="Mekari Project home">
-        <MekariLockup variant="dark" />
-      </Link>
+      <WorkspaceSwitcher />
 
       <div className="space-y-0.5 px-2">
         <NavItem to="/" end icon={<HomeIcon />}>
@@ -208,7 +208,8 @@ export function Sidebar() {
         </button>
       </div>
       {newProject && <NewProjectDialog open onClose={() => setNewProject(false)} />}
-      {profile && <ProfileDialog onClose={() => setProfile(false)} />}
+      {profile && <ProfileDialog onClose={() => setProfile(false)} onCreateWorkspace={() => setCreatingWs(true)} />}
+      <CreateWorkspaceDialog open={creatingWs} onClose={() => setCreatingWs(false)} />
     </nav>
   );
 }

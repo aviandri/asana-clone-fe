@@ -1,7 +1,7 @@
 // Mock implementation of the Goals / OKR endpoints (SPEC §10).
 import type { Goal, GoalDetail, GoalStatus, GoalUpdate, KeyResult, MetricType, ProgressSource } from '@/api/types';
 import { uid, type GoalRow, type KeyResultRow, type MockDb, type UserRow } from './db';
-import { HttpError, canSeeProject, forbidden, notFound, nowIso, summary, userById, type Handler } from './shared';
+import { HttpError, assertWorkspaceMember, canSeeProject, forbidGuest, forbidden, notFound, nowIso, roleIn, summary, userById, type Handler } from './shared';
 
 const PERIOD_RE = /^\d{4}(-(H[12]|Q[1-4]))?$/;
 const STATUSES: GoalStatus[] = ['NO_STATUS', 'ON_TRACK', 'AT_RISK', 'OFF_TRACK', 'ACHIEVED', 'PARTIAL', 'MISSED', 'DROPPED'];
@@ -63,11 +63,12 @@ function goalRaw(db: MockDb, g: GoalRow, seen = new Set<string>()): number {
 const inTeam = (db: MockDb, teamId: string, userId: string) => db.teamMembers.some((m) => m.teamId === teamId && m.userId === userId);
 
 function canEditGoal(db: MockDb, g: GoalRow, me: UserRow) {
-  return me.role === 'ADMIN' || g.ownerId === me.id || (!!g.teamId && inTeam(db, g.teamId, me.id));
+  return roleIn(db, g.workspaceId, me.id) === 'ADMIN' || g.ownerId === me.id || (!!g.teamId && inTeam(db, g.teamId, me.id));
 }
-function assertCanCreateAt(db: MockDb, level: { isCompany: boolean; teamId: string | null }, me: UserRow) {
+function assertCanCreateAt(db: MockDb, workspaceId: string, level: { isCompany: boolean; teamId: string | null }, me: UserRow) {
   if (level.isCompany && level.teamId) throw fieldError('isCompany', 'A goal is either a company goal or a team goal');
-  if (me.role === 'ADMIN') return;
+  if (level.teamId && !db.teams.some((t) => t.id === level.teamId && t.workspaceId === workspaceId)) throw notFound();
+  if (roleIn(db, workspaceId, me.id) === 'ADMIN') return;
   if (level.isCompany) throw forbidden();
   if (level.teamId && !inTeam(db, level.teamId, me.id)) throw forbidden();
 }
@@ -79,6 +80,7 @@ function serializeGoal(db: MockDb, g: GoalRow, me: UserRow): Goal {
   const team = g.teamId ? db.teams.find((x) => x.id === g.teamId) : null;
   return {
     id: g.id,
+    workspaceId: g.workspaceId,
     title: g.title,
     description: g.description,
     owner: summary(userById(db, g.ownerId)),
@@ -138,14 +140,17 @@ function serializeGoalDetail(db: MockDb, g: GoalRow, me: UserRow): GoalDetail {
 
 // ---------- validation ----------
 
-function getGoal(db: MockDb, id: string) {
+/** Goals are invisible to guests and to non-members of the goal's workspace (SPEC §12). */
+function getGoal(db: MockDb, id: string, me: UserRow) {
   const g = tables(db).goals.find((x) => x.id === id);
-  if (!g) throw notFound();
+  const role = g && roleIn(db, g.workspaceId, me.id);
+  if (!g || !role || role === 'GUEST') throw notFound();
   return g;
 }
-function getKr(db: MockDb, id: string) {
+function getKr(db: MockDb, id: string, me: UserRow) {
   const k = tables(db).krs.find((x) => x.id === id);
   if (!k) throw notFound();
+  getGoal(db, k.goalId, me);
   return k;
 }
 function depthAbove(db: MockDb, parentId: string | null) {
@@ -161,11 +166,12 @@ function subtreeHeight(db: MockDb, id: string): number {
   const kids = tables(db).goals.filter((g) => g.parentId === id);
   return 1 + Math.max(0, ...kids.map((k) => subtreeHeight(db, k.id)));
 }
-function assertValidParent(db: MockDb, goalId: string | null, parentId: string | null) {
+function assertValidParent(db: MockDb, workspaceId: string, goalId: string | null, parentId: string | null) {
   if (!parentId) return;
   if (parentId === goalId) throw fieldError('parentId', 'A goal can’t be its own parent');
   const parent = tables(db).goals.find((g) => g.id === parentId);
   if (!parent) throw fieldError('parentId', 'Parent goal not found');
+  if (parent.workspaceId !== workspaceId) throw fieldError('parentId', 'The parent goal is in another workspace');
   // Walk up from the new parent: reaching this goal means a cycle.
   for (let cur: GoalRow | undefined = parent; cur; cur = cur.parentId ? tables(db).goals.find((g) => g.id === cur!.parentId) : undefined) {
     if (cur.id === goalId) throw fieldError('parentId', 'That would create a cycle');
@@ -189,12 +195,13 @@ export const goalRoutes: [string, string, Handler][] = [
   [
     'GET',
     '/goals/time-periods',
-    ({ db }) => {
+    ({ db, ws }) => {
+      const wsId = ws().id;
       const now = new Date();
       const y = now.getFullYear();
       const current = [String(y), `${y}-H${now.getMonth() < 6 ? 1 : 2}`, `${y}-Q${Math.floor(now.getMonth() / 3) + 1}`];
       const rank: Record<string, number> = { '': 0, H1: 1, Q1: 2, Q2: 3, H2: 4, Q3: 5, Q4: 6 };
-      const all = [...new Set([...tables(db).goals.map((g) => g.timePeriod), ...current])];
+      const all = [...new Set([...tables(db).goals.filter((g) => g.workspaceId === wsId).map((g) => g.timePeriod), ...current])];
       all.sort((a, b) => {
         const [ya, pa = ''] = a.split('-');
         const [yb, pb = ''] = b.split('-');
@@ -206,7 +213,9 @@ export const goalRoutes: [string, string, Handler][] = [
   [
     'GET',
     '/goals',
-    ({ db, me, query }) => {
+    ({ db, me, ws, role, query }) => {
+      const wsId = ws().id;
+      if (role() === 'GUEST') return { data: [] };
       const period = query.get('timePeriod');
       const teamId = query.get('teamId');
       const ownerId = query.get('ownerId');
@@ -214,7 +223,8 @@ export const goalRoutes: [string, string, Handler][] = [
       const q = (query.get('q') ?? '').toLowerCase();
       return {
         data: tables(db)
-          .goals.filter((g) => (!period || g.timePeriod === period) && (!teamId || g.teamId === teamId) && (!ownerId || g.ownerId === ownerId))
+          .goals.filter((g) => g.workspaceId === wsId)
+          .filter((g) => (!period || g.timePeriod === period) && (!teamId || g.teamId === teamId) && (!ownerId || g.ownerId === ownerId))
           .filter((g) => !company || g.isCompany)
           .filter((g) => !q || g.title.toLowerCase().includes(q))
           .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
@@ -225,21 +235,23 @@ export const goalRoutes: [string, string, Handler][] = [
   [
     'POST',
     '/goals',
-    ({ db, me, body }) => {
+    ({ db, me, ws, role, body }) => {
+      forbidGuest(role());
+      const wsId = ws().id;
       const title = String(body?.title ?? '').trim();
       if (!title) throw fieldError('title', 'title is required');
       if (!PERIOD_RE.test(String(body.timePeriod ?? ''))) throw fieldError('timePeriod', 'timePeriod must be YYYY, YYYY-H1|H2 or YYYY-Q1..Q4');
       const isCompany = !!body.isCompany;
       const teamId: string | null = body.teamId ?? null;
-      if (teamId && !db.teams.some((t) => t.id === teamId)) throw notFound();
-      assertCanCreateAt(db, { isCompany, teamId }, me!);
+      assertCanCreateAt(db, wsId, { isCompany, teamId }, me!);
       const ownerId: string = body.ownerId ?? me!.id;
-      const owner = db.users.find((u) => u.id === ownerId && u.isActive);
-      if (!owner) throw fieldError('ownerId', 'Owner must be an active user');
+      if (!db.users.some((u) => u.id === ownerId && u.isActive)) throw fieldError('ownerId', 'Owner must be an active user');
+      assertWorkspaceMember(db, wsId, ownerId, 'ownerId');
       if (body.progressSource !== undefined && !SOURCES.includes(body.progressSource)) throw fieldError('progressSource', 'bad progressSource');
-      assertValidParent(db, null, body.parentId ?? null);
+      assertValidParent(db, wsId, null, body.parentId ?? null);
       const g: GoalRow = {
         id: uid(db, 'goal'),
+        workspaceId: wsId,
         title,
         description: body.description ?? null,
         ownerId,
@@ -258,12 +270,12 @@ export const goalRoutes: [string, string, Handler][] = [
       return { status: 201, body: serializeGoalDetail(db, g, me!) };
     },
   ],
-  ['GET', '/goals/:id', ({ db, me, params }) => serializeGoalDetail(db, getGoal(db, params.id), me!)],
+  ['GET', '/goals/:id', ({ db, me, params }) => serializeGoalDetail(db, getGoal(db, params.id, me!), me!)],
   [
     'PATCH',
     '/goals/:id',
     ({ db, me, params, body }) => {
-      const g = getGoal(db, params.id);
+      const g = getGoal(db, params.id, me!);
       if (!canEditGoal(db, g, me!)) throw forbidden();
       const b = body ?? {};
       if ('title' in b && !String(b.title ?? '').trim()) throw fieldError('title', 'title is required');
@@ -274,15 +286,15 @@ export const goalRoutes: [string, string, Handler][] = [
         throw fieldError('manualProgress', 'manualProgress must be 0–100');
       if ('weight' in b && !(Number.isInteger(b.weight) && b.weight >= 1)) throw fieldError('weight', 'weight must be an integer ≥ 1');
       if ('ownerId' in b && !db.users.some((u) => u.id === b.ownerId && u.isActive)) throw fieldError('ownerId', 'Owner must be an active user');
+      if ('ownerId' in b) assertWorkspaceMember(db, g.workspaceId, b.ownerId, 'ownerId');
       if ('isCompany' in b || 'teamId' in b) {
         const level = { isCompany: 'isCompany' in b ? !!b.isCompany : g.isCompany, teamId: 'teamId' in b ? (b.teamId ?? null) : g.teamId };
-        if (level.teamId && !db.teams.some((t) => t.id === level.teamId)) throw notFound();
-        if (level.isCompany !== g.isCompany || level.teamId !== g.teamId) assertCanCreateAt(db, level, me!);
+        if (level.isCompany !== g.isCompany || level.teamId !== g.teamId) assertCanCreateAt(db, g.workspaceId, level, me!);
         g.isCompany = level.isCompany;
         g.teamId = level.teamId;
       }
       if ('parentId' in b) {
-        assertValidParent(db, g.id, b.parentId ?? null);
+        assertValidParent(db, g.workspaceId, g.id, b.parentId ?? null);
         g.parentId = b.parentId ?? null;
       }
       for (const k of ['title', 'description', 'ownerId', 'timePeriod', 'status', 'progressSource', 'manualProgress', 'weight'] as const) {
@@ -296,7 +308,7 @@ export const goalRoutes: [string, string, Handler][] = [
     'DELETE',
     '/goals/:id',
     ({ db, me, params }) => {
-      const g = getGoal(db, params.id);
+      const g = getGoal(db, params.id, me!);
       if (!canEditGoal(db, g, me!)) throw forbidden();
       const t = tables(db);
       db.goals = t.goals.filter((x) => x.id !== g.id);
@@ -313,7 +325,7 @@ export const goalRoutes: [string, string, Handler][] = [
     'POST',
     '/goals/:id/key-results',
     ({ db, me, params, body }) => {
-      const g = getGoal(db, params.id);
+      const g = getGoal(db, params.id, me!);
       if (!canEditGoal(db, g, me!)) throw forbidden();
       const b = body ?? {};
       validateKrFields(b, false);
@@ -323,6 +335,7 @@ export const goalRoutes: [string, string, Handler][] = [
         throw fieldError('currentValue', 'BOOLEAN key results take 0 or 1');
       if (!boolean && typeof b.targetValue !== 'number') throw fieldError('targetValue', 'targetValue is required');
       if (b.ownerId && !db.users.some((u) => u.id === b.ownerId && u.isActive)) throw fieldError('ownerId', 'Owner must be an active user');
+      if (b.ownerId) assertWorkspaceMember(db, g.workspaceId, b.ownerId, 'ownerId');
       const startValue = boolean ? 0 : (b.startValue ?? 0);
       const krs = tables(db).krs.filter((k) => k.goalId === g.id);
       const k: KeyResultRow = {
@@ -347,8 +360,8 @@ export const goalRoutes: [string, string, Handler][] = [
     'PATCH',
     '/key-results/:id',
     ({ db, me, params, body }) => {
-      const k = getKr(db, params.id);
-      const g = getGoal(db, k.goalId);
+      const k = getKr(db, params.id, me!);
+      const g = getGoal(db, k.goalId, me!);
       const b = body ?? {};
       const onlyCurrent = Object.keys(b).every((key) => key === 'currentValue');
       const allowed = canEditGoal(db, g, me!) || (onlyCurrent && k.ownerId === me!.id);
@@ -372,8 +385,8 @@ export const goalRoutes: [string, string, Handler][] = [
     'DELETE',
     '/key-results/:id',
     ({ db, me, params }) => {
-      const k = getKr(db, params.id);
-      if (!canEditGoal(db, getGoal(db, k.goalId), me!)) throw forbidden();
+      const k = getKr(db, params.id, me!);
+      if (!canEditGoal(db, getGoal(db, k.goalId, me!), me!)) throw forbidden();
       db.keyResults = tables(db).krs.filter((x) => x.id !== k.id);
       return { status: 204 };
     },
@@ -382,10 +395,10 @@ export const goalRoutes: [string, string, Handler][] = [
     'POST',
     '/goals/:id/projects',
     ({ db, me, params, body }) => {
-      const g = getGoal(db, params.id);
+      const g = getGoal(db, params.id, me!);
       if (!canEditGoal(db, g, me!)) throw forbidden();
       const p = db.projects.find((x) => x.id === body?.projectId);
-      if (!p || !canSeeProject(db, p, me!)) throw notFound();
+      if (!p || p.workspaceId !== g.workspaceId || !canSeeProject(db, p, me!)) throw notFound();
       const t = tables(db);
       if (!t.links.some((l) => l.goalId === g.id && l.projectId === p.id)) t.links.push({ goalId: g.id, projectId: p.id });
       return serializeGoalDetail(db, g, me!);
@@ -395,7 +408,7 @@ export const goalRoutes: [string, string, Handler][] = [
     'DELETE',
     '/goals/:id/projects/:projectId',
     ({ db, me, params }) => {
-      const g = getGoal(db, params.id);
+      const g = getGoal(db, params.id, me!);
       if (!canEditGoal(db, g, me!)) throw forbidden();
       db.goalProjects = tables(db).links.filter((l) => !(l.goalId === g.id && l.projectId === params.projectId));
       return serializeGoalDetail(db, g, me!);
@@ -404,8 +417,8 @@ export const goalRoutes: [string, string, Handler][] = [
   [
     'GET',
     '/goals/:id/updates',
-    ({ db, params }) => {
-      const g = getGoal(db, params.id);
+    ({ db, me, params }) => {
+      const g = getGoal(db, params.id, me!);
       return {
         data: tables(db)
           .updates.filter((u) => u.goalId === g.id)
@@ -418,7 +431,7 @@ export const goalRoutes: [string, string, Handler][] = [
     'POST',
     '/goals/:id/updates',
     ({ db, me, params, body }) => {
-      const g = getGoal(db, params.id);
+      const g = getGoal(db, params.id, me!);
       const ownsKr = tables(db).krs.some((k) => k.goalId === g.id && k.ownerId === me!.id);
       if (!canEditGoal(db, g, me!) && !ownsKr) throw forbidden();
       if (!STATUSES.includes(body?.status)) throw fieldError('status', 'status is required');

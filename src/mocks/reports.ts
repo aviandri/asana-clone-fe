@@ -3,7 +3,7 @@
 import { addDays, addWeeks, differenceInCalendarDays, format, parseISO, startOfWeek } from 'date-fns';
 import type { Priority, ProjectReport, WorkloadReport } from '@/api/types';
 import type { MockDb, ProjectRow, TaskRow } from './db';
-import { HttpError, canSeeProject, canSeeTask, serializeProject, serializeTask, summary, visibleProject, type Handler } from './shared';
+import { HttpError, activeMembers, canSeeProject, canSeeTask, forbidGuest, serializeProject, serializeTask, summary, visibleProject, type Handler } from './shared';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const PRIORITY_ORDER: Priority[] = ['HIGH', 'MEDIUM', 'LOW', 'NONE'];
@@ -138,10 +138,11 @@ export const reportRoutes: [string, string, Handler][] = [
   [
     'GET',
     '/reports/overview',
-    ({ db, me, query }) => {
+    ({ db, me, ws, query }) => {
       const teamId = query.get('teamId');
+      const wsId = ws().id;
       const projects = db.projects
-        .filter((p) => !p.archived && canSeeProject(db, p, me!) && (!teamId || p.teamId === teamId))
+        .filter((p) => p.workspaceId === wsId && !p.archived && canSeeProject(db, p, me!) && (!teamId || p.teamId === teamId))
         .sort((a, b) => a.name.localeCompare(b.name));
       const rows = projects.map((p) => {
         const tasks = db.tasks.filter((t) => t.projectId === p.id);
@@ -160,7 +161,9 @@ export const reportRoutes: [string, string, Handler][] = [
   [
     'GET',
     '/reports/workload',
-    ({ db, me, query }): WorkloadReport => {
+    ({ db, me, ws, role, query }): WorkloadReport => {
+      forbidGuest(role());
+      const wsId = ws().id;
       const teamId = query.get('teamId');
       const monday = startOfWeek(new Date(), { weekStartsOn: 1 });
       const from = query.get('from') ?? ymd(monday);
@@ -170,12 +173,13 @@ export const reportRoutes: [string, string, Handler][] = [
       const span = differenceInCalendarDays(parseISO(to), parseISO(from)) + 1;
       if (span < 1) throw fieldError('to', 'to must be on or after from');
       if (span > 92) throw fieldError('to', 'Range can be at most 92 days');
-      if (teamId && !db.teams.some((t) => t.id === teamId)) throw new HttpError(404, 'NOT_FOUND', 'Not found');
+      if (teamId && !db.teams.some((t) => t.id === teamId && t.workspaceId === wsId)) throw new HttpError(404, 'NOT_FOUND', 'Not found');
 
       const teamProjects = teamId ? new Set(db.projects.filter((p) => p.teamId === teamId).map((p) => p.id)) : null;
-      const users = db.users.filter((u) => u.isActive && (!teamId || db.teamMembers.some((m) => m.teamId === teamId && m.userId === u.id)));
+      const members = new Set(activeMembers(db, wsId).map((m) => m.userId));
+      const users = db.users.filter((u) => u.isActive && members.has(u.id) && (!teamId || db.teamMembers.some((m) => m.teamId === teamId && m.userId === u.id)));
       const tasks = db.tasks.filter(
-        (t) => t.assigneeId && canSeeTask(db, t, me!) && (teamProjects ? !!t.projectId && teamProjects.has(t.projectId) : true),
+        (t) => t.workspaceId === wsId && t.assigneeId && canSeeTask(db, t, me!) && (teamProjects ? !!t.projectId && teamProjects.has(t.projectId) : true),
       );
       const now = today();
       const inRange = (d: string | null) => !!d && d >= from && d <= to;

@@ -1,4 +1,4 @@
-import { API_BASE, http } from './client';
+import { API_BASE, http, request } from './client';
 import type {
   CreateGoalInput,
   CreateKeyResultInput,
@@ -15,7 +15,12 @@ import type {
   WorkloadReport,
   CreateTaskInput,
   Invite,
+  InviteInfo,
+  JoinableWorkspace,
   ListResponse,
+  Me,
+  PendingInvite,
+  Workspace,
   NotificationsResponse,
   Project,
   ProjectDetail,
@@ -35,13 +40,31 @@ import type {
 } from './types';
 
 export const authApi = {
-  login: (email: string, password: string) => http.post<User>('/auth/login', { email, password }),
+  login: (email: string, password: string) => http.post<Me>('/auth/login', { email, password }),
   logout: () => http.post<void>('/auth/logout'),
-  me: () => http.get<User>('/auth/me'),
-  getInvite: (token: string) =>
-    http.get<{ email: string; role: Role }>(`/auth/invites/${encodeURIComponent(token)}`),
+  /** `workspaceId: null` asks without a header (server picks the last/oldest workspace). */
+  me: (opts: { workspaceId?: string | null } = {}) => http.get<Me>('/auth/me', undefined, opts),
+  getInvite: (token: string) => http.get<InviteInfo>(`/auth/invites/${encodeURIComponent(token)}`),
   acceptInvite: (token: string, name: string, password: string) =>
-    http.post<User>('/auth/accept-invite', { token, name, password }),
+    http.post<Me>('/auth/accept-invite', { token, name, password }),
+};
+
+export type UpdateWorkspaceInput = Partial<{ name: string; color: string; isOrganization: boolean; domain: string | null }>;
+
+export const workspacesApi = {
+  list: () => http.get<ListResponse<Workspace>>('/workspaces'),
+  get: (id: string) => http.get<Workspace>(`/workspaces/${id}`),
+  create: (body: { name: string; color?: string }) => http.post<Workspace>('/workspaces', body),
+  update: (id: string, body: UpdateWorkspaceInput) =>
+    http.patch<Workspace & { convertedToGuests?: number }>(`/workspaces/${id}`, body),
+  delete: (id: string, confirmName: string) => request<void>('DELETE', `/workspaces/${id}`, { body: { confirmName } }),
+  switch: (id: string) => http.post<Workspace>(`/workspaces/${id}/switch`),
+  leave: (id: string) => http.post<void>(`/workspaces/${id}/leave`),
+  joinable: () => http.get<ListResponse<JoinableWorkspace>>('/workspaces/joinable'),
+  join: (id: string) => http.post<Workspace>(`/workspaces/${id}/join`),
+  myInvites: () => http.get<ListResponse<PendingInvite>>('/me/invites'),
+  acceptInvite: (id: string) => http.post<Workspace>(`/me/invites/${id}/accept`),
+  declineInvite: (id: string) => http.delete(`/me/invites/${id}`),
 };
 
 export const usersApi = {
@@ -122,8 +145,8 @@ export const commentsApi = {
 };
 
 export const notificationsApi = {
-  list: (query: { unread?: boolean; limit?: number } = {}) =>
-    http.get<NotificationsResponse>('/notifications', query),
+  list: (query: { unread?: boolean; limit?: number } = {}, opts: { workspaceId?: string } = {}) =>
+    http.get<NotificationsResponse>('/notifications', query, opts),
   markRead: (id: string) => http.post<void>(`/notifications/${id}/read`),
   markAllRead: () => http.post<void>('/notifications/read-all'),
 };

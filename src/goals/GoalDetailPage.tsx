@@ -19,6 +19,7 @@ import { AssigneeField } from '@/tasks/fields';
 import { ProgressBar, StatusPill } from './GoalBits';
 import { NewGoalDialog } from './NewGoalDialog';
 import { useGoal, useGoalMutations, useGoals, useGoalUpdates, useKeyResultMutations } from './useGoals';
+import { useFollowWorkspace } from '@/workspace/useWorkspace';
 
 function Section({ title, action, children, label }: { title: string; action?: ReactNode; children: ReactNode; label?: string }) {
   return (
@@ -414,6 +415,7 @@ export function GoalDetailPage() {
   const navigate = useNavigate();
   const goal = useGoal(goalId);
   const m = useGoalMutations(goalId);
+  useFollowWorkspace(goal.data?.workspaceId, 'goal');
   const [addingKr, setAddingKr] = useState(false);
   const [addingSub, setAddingSub] = useState(false);
 

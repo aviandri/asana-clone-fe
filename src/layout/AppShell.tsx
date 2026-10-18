@@ -1,14 +1,17 @@
 import { AnimatePresence, m } from 'motion/react';
-import { useEffect, useState } from 'react';
-import { Outlet, useLocation } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
-import { AppIcon } from '@/components/brand/Brand';
+import { useCurrentUser } from '@/auth/useAuth';
+import { AppIcon, MekariLockup } from '@/components/brand/Brand';
 import { MenuIcon, SearchIcon } from '@/components/icons';
 import { Toaster } from '@/components/Toaster';
 import { SearchPalette } from '@/search/SearchPalette';
 import { TaskPanel } from '@/tasks/TaskPanel';
 import { useTaskPanel } from '@/tasks/useTaskPanel';
 import { DUR, EASE_OUT, exit, panelSpring } from '@/motion/tokens';
+import { useWorkspaceHotkeys } from '@/workspace/useWorkspace';
+import { WorkspaceRail } from '@/workspace/WorkspaceRail';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -23,7 +26,14 @@ function TopBar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
       >
         <MenuIcon />
       </button>
-      <AppIcon className="hidden h-6 w-6 md:block" />
+      <Link
+        to="/"
+        aria-label="Mekari Project home"
+        className="hidden shrink-0 items-center gap-2 rounded-md px-1 py-1 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring md:flex"
+      >
+        <AppIcon className="h-6 w-6" />
+        <MekariLockup variant="dark" className="hidden lg:inline-flex" />
+      </Link>
       <div className="flex flex-1 justify-center">
         <button
           type="button"
@@ -35,7 +45,7 @@ function TopBar({ onMenu, onSearch }: { onMenu: () => void; onSearch: () => void
           <kbd className="rounded border border-white/25 px-1 font-sans text-[10px] text-sidebar-muted">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
         </button>
       </div>
-      <span className="hidden w-6 md:block" aria-hidden />
+      <span className="hidden w-6 md:block lg:w-[190px]" aria-hidden />
     </header>
   );
 }
@@ -46,18 +56,30 @@ export function AppShell() {
   const { taskId } = useTaskPanel();
   const section = location.pathname.split('/')[1] || 'home';
   const [searchOpen, setSearchOpen] = useState(false);
+  const me = useCurrentUser();
+  // Everything below the rail belongs to one workspace: remount (fresh queries) on switch.
+  const wsKey = me.currentWorkspace?.id ?? 'none';
+  const showRail = me.workspaces.length >= 2;
+  const workspaceHotkey = useWorkspaceHotkeys();
+  const prevWs = useRef(wsKey);
+  const justSwitched = prevWs.current !== wsKey;
+  useEffect(() => {
+    prevWs.current = wsKey;
+  }, [wsKey]);
 
-  // Global search: Cmd/Ctrl+K (works even while typing elsewhere).
+  // Global shortcuts (work even while typing elsewhere): Cmd/Ctrl+K search, Cmd/Ctrl+1…9 workspaces.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen((o) => !o);
+      } else {
+        workspaceHotkey(e);
       }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, []);
+  }, [workspaceHotkey]);
 
   // Close the mobile drawer on navigation.
   useEffect(() => setMobileOpen(false), [location.pathname]);
@@ -66,28 +88,35 @@ export function AppShell() {
     <div className="flex h-full flex-col overflow-hidden bg-sidebar">
       <TopBar onMenu={() => setMobileOpen(true)} onSearch={() => setSearchOpen(true)} />
       <div className="flex min-h-0 flex-1">
-        {/* Desktop sidebar */}
-        <div className="hidden w-60 shrink-0 md:block">
-          <Sidebar />
+        {/* Desktop rail + sidebar */}
+        <div className="hidden shrink-0 md:flex">
+          {showRail && <WorkspaceRail />}
+          <m.div key={wsKey} className="w-60" initial={{ opacity: 0 }} animate={{ opacity: 1, transition: { duration: DUR.slow, ease: EASE_OUT } }}>
+            <Sidebar />
+          </m.div>
         </div>
         {/* Mobile drawer */}
         {mobileOpen && (
           <div className="fixed inset-0 z-40 md:hidden">
             <div className="absolute inset-0 bg-black/40" onClick={() => setMobileOpen(false)} />
-            <div className="relative h-full w-64">
-              <Sidebar />
+            <div className="relative flex h-full">
+              {showRail && <WorkspaceRail />}
+              <div className="w-64">
+                <Sidebar key={wsKey} />
+              </div>
             </div>
           </div>
         )}
         {/* Content sits on a light card inset into the dark frame, like Slack. */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-white md:rounded-tl-lg">
           <div className="relative flex min-h-0 flex-1">
-            {/* 120ms fade when switching sections (not between a project's views — no remount). */}
+            {/* 120ms fade between sections (not between a project's views — no remount); a slower
+                fade-and-settle on workspace switch. Reduced motion keeps only the opacity fade. */}
             <m.main
-              key={section}
+              key={`${wsKey}:${section}`}
               className="min-w-0 flex-1 overflow-hidden"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1, transition: { duration: DUR.fast, ease: EASE_OUT } }}
+              initial={justSwitched ? { opacity: 0, scale: 0.995 } : { opacity: 0 }}
+              animate={{ opacity: 1, scale: 1, transition: { duration: justSwitched ? DUR.slow : DUR.fast, ease: EASE_OUT } }}
             >
               <Outlet />
             </m.main>

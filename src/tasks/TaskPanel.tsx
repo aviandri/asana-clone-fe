@@ -17,6 +17,7 @@ import { AssigneeField, CompleteToggle, DueDateField, PrioritySelect, UserPicker
 import { useCreateTask, useDeleteTask, useFollowTask, useUpdateTask } from './useTaskMutations';
 import { useTaskPanel } from './useTaskPanel';
 import { useToggleComplete } from './useToggleComplete';
+import { useFollowWorkspace } from '@/workspace/useWorkspace';
 
 function FieldRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -254,6 +255,7 @@ export function TaskPanel({ taskId }: { taskId: string }) {
   const task = useTask(taskId);
   const project = useProject(task.data?.projectId ?? undefined);
   const update = useUpdateTask();
+  useFollowWorkspace(task.data?.workspaceId, 'task');
 
   // Escape closes the panel (inputs stop propagation for their own Escape handling).
   useEffect(() => {

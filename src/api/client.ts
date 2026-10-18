@@ -1,3 +1,4 @@
+import { getWorkspaceId } from '@/workspace/workspaceId';
 import type { ErrorBody, ErrorCode } from './types';
 
 export const API_BASE = '/api/v1';
@@ -42,15 +43,27 @@ function buildUrl(path: string, query?: Query) {
   return qs ? `${url}?${qs}` : url;
 }
 
-export async function request<T>(
-  method: string,
-  path: string,
-  opts: { body?: unknown; query?: Query } = {},
-): Promise<T> {
-  const init: RequestInit = { method, credentials: 'include', headers: {} };
+export const WORKSPACE_HEADER = 'X-Workspace-Id';
+
+/** Headers every request carries: the tab's workspace (SPEC §12), unless overridden per call. */
+function baseHeaders(workspaceId?: string | null): Record<string, string> {
+  const ws = workspaceId === undefined ? getWorkspaceId() : workspaceId;
+  return ws ? { [WORKSPACE_HEADER]: ws } : {};
+}
+
+export type RequestOpts = {
+  body?: unknown;
+  query?: Query;
+  /** Send a different workspace than the tab's (e.g. per-workspace unread counts); null = none. */
+  workspaceId?: string | null;
+};
+
+export async function request<T>(method: string, path: string, opts: RequestOpts = {}): Promise<T> {
+  const headers = baseHeaders(opts.workspaceId);
+  const init: RequestInit = { method, credentials: 'include', headers };
   if (opts.body !== undefined) {
     init.body = JSON.stringify(opts.body);
-    (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
+    headers['Content-Type'] = 'application/json';
   }
   let res: Response;
   try {
@@ -83,7 +96,8 @@ export async function request<T>(
 }
 
 export const http = {
-  get: <T>(path: string, query?: Query) => request<T>('GET', path, { query }),
+  get: <T>(path: string, query?: Query, opts: Pick<RequestOpts, 'workspaceId'> = {}) =>
+    request<T>('GET', path, { query, ...opts }),
   post: <T>(path: string, body?: unknown) => request<T>('POST', path, { body: body ?? {} }),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, { body }),
   delete: <T = void>(path: string) => request<T>('DELETE', path),
@@ -91,7 +105,7 @@ export const http = {
 
 /** Fetch a non-JSON resource (e.g. a CSV export) through the configured transport. */
 export async function requestBlob(path: string): Promise<{ blob: Blob; filename: string | null }> {
-  const res = await fetchImpl(`${API_BASE}${path}`, { method: 'GET', credentials: 'include' });
+  const res = await fetchImpl(`${API_BASE}${path}`, { method: 'GET', credentials: 'include', headers: baseHeaders() });
   if (!res.ok) throw new ApiError(res.status, res.status === 401 ? 'UNAUTHORIZED' : 'INTERNAL', res.statusText || 'Download failed');
   const disposition = res.headers.get('Content-Disposition') ?? '';
   const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? null;

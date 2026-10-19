@@ -104,6 +104,29 @@ export type ActivityRow = {
   data: unknown;
   createdAt: string;
 };
+/** SPEC §13. `contentUrl` stands in for the server's storage: a blob:/data: URL the browser can load. */
+export type AttachmentRow = {
+  id: string;
+  workspaceId: string;
+  taskId: string;
+  commentId: string | null;
+  uploaderId: string;
+  kind: 'FILE' | 'LINK';
+  draft: boolean;
+  createdAt: string;
+  name: string | null;
+  mimeType: string | null;
+  size: number | null;
+  width: number | null;
+  height: number | null;
+  contentUrl: string | null;
+  url: string | null;
+  title: string | null;
+  description: string | null;
+  siteName: string | null;
+  provider: string | null;
+  previewStatus: 'PENDING' | 'READY' | 'FAILED' | null;
+};
 export type NotificationRow = {
   id: string;
   workspaceId: string;
@@ -182,6 +205,8 @@ export type MockDb = {
   keyResults?: KeyResultRow[];
   goalProjects?: GoalProjectRow[];
   goalUpdates?: GoalUpdateRow[];
+  // v1.3 — optional for the same reason.
+  attachments?: AttachmentRow[];
 };
 
 export function uid(db: MockDb, prefix = 'id'): string {
@@ -353,6 +378,59 @@ export function createSeedDb(): MockDb {
     dueDate: day(0),
     priority: 'HIGH',
   });
+  // SPEC §13 seed (no network): an image, a text file and a link on one task. Data URLs stand in
+  // for the server's storage.
+  const seedAttachment = (row: Partial<AttachmentRow> & Pick<AttachmentRow, 'kind'>): AttachmentRow => ({
+    id: uid(db, 'atch'),
+    workspaceId: t5.workspaceId,
+    taskId: t5.id,
+    commentId: null,
+    uploaderId: admin.id,
+    draft: false,
+    createdAt: now,
+    name: null,
+    mimeType: null,
+    size: null,
+    width: null,
+    height: null,
+    contentUrl: null,
+    url: null,
+    title: null,
+    description: null,
+    siteName: null,
+    provider: null,
+    previewStatus: null,
+    ...row,
+  });
+  const headerNotes = 'Header spec\n\n- Logo left, nav right\n- Collapses to a menu under 768px\n';
+  db.attachments = [
+    seedAttachment({
+      kind: 'LINK',
+      url: 'https://www.figma.com/file/mekari-header',
+      title: 'Header explorations',
+      description: 'Desktop and mobile header variants for the redesign.',
+      siteName: 'Figma',
+      provider: 'figma',
+      previewStatus: 'READY',
+    }),
+    seedAttachment({
+      kind: 'FILE',
+      name: 'header-notes.txt',
+      mimeType: 'text/plain',
+      size: headerNotes.length,
+      contentUrl: `data:text/plain;charset=utf-8,${encodeURIComponent(headerNotes)}`,
+    }),
+    seedAttachment({
+      kind: 'FILE',
+      name: 'header-mock.png',
+      mimeType: 'image/png',
+      size: 127,
+      width: 64,
+      height: 40,
+      contentUrl:
+        'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAAAoCAIAAADBrGu+AAAARklEQVR42u3WQQ0AIAwEwZqpTqzipKigKWQua2B+FzvX0wUAAAAAAAAAAMCHgBo2AAAAAAAAAIBOgDcKAAAAAAAAAABwvQOFWHlPJgAW3AAAAABJRU5ErkJggg==',
+    }),
+  ];
   mkTask(web.p, wProg, 'Set up analytics', { assigneeId: bob.id, dueDate: day(3) });
   mkTask(web.p, wProg, 'Migrate blog posts', { assigneeId: alice.id, dueDate: day(12), priority: 'MEDIUM' });
   mkTask(web.p, wDone, 'Kickoff meeting', {

@@ -79,7 +79,9 @@ export function Modal({
             aria-modal="true"
             aria-labelledby={titleId}
             tabIndex={-1}
-            className={clsx('w-full max-w-md rounded-xl bg-white shadow-2xl outline-none', className)}
+            // The default width only when the caller sets none: Tailwind emits `max-w-md` after
+            // `max-w-lg`/`-5xl`, so passing both would always end up at md.
+            className={clsx('w-full rounded-xl bg-white shadow-2xl outline-none', !className?.includes('max-w-') && 'max-w-md', className)}
             initial={{ opacity: 0, scale: 0.97, y: position === 'top' ? -6 : 4 }}
             animate={{ opacity: 1, scale: 1, y: 0, transition: enter }}
             exit={{ opacity: 0, scale: 0.98, transition: exit }}

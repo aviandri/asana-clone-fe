@@ -12,6 +12,7 @@ import { useTaskPanel } from '@/tasks/useTaskPanel';
 import { DUR, EASE_OUT, exit, panelSpring } from '@/motion/tokens';
 import { useWorkspaceHotkeys } from '@/workspace/useWorkspace';
 import { WorkspaceRail } from '@/workspace/WorkspaceRail';
+import { useNoFileNavigation } from '@/attachments/useFileDrop';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
@@ -61,6 +62,8 @@ export function AppShell() {
   const wsKey = me.currentWorkspace?.id ?? 'none';
   const showRail = me.workspaces.length >= 2;
   const workspaceHotkey = useWorkspaceHotkeys();
+  // A file dropped anywhere but an attachment target does nothing (instead of the browser opening it).
+  useNoFileNavigation();
   const prevWs = useRef(wsKey);
   const justSwitched = prevWs.current !== wsKey;
   useEffect(() => {

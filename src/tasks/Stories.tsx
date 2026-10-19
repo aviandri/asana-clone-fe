@@ -71,6 +71,10 @@ function useActivityText() {
           : 'cleared the priority';
       case 'DESCRIPTION_CHANGED':
         return 'changed the description';
+      case 'ATTACHMENT_ADDED':
+        return d.kind === 'LINK' ? `added the link “${d.name ?? ''}”` : `attached “${d.name ?? 'a file'}”`;
+      case 'ATTACHMENT_REMOVED':
+        return d.kind === 'LINK' ? `removed the link “${d.name ?? ''}”` : `removed the attachment “${d.name ?? 'a file'}”`;
       default:
         return String(s.type).toLowerCase().replace(/_/g, ' ');
     }

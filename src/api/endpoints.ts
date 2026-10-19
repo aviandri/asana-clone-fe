@@ -1,5 +1,7 @@
-import { API_BASE, http, request } from './client';
+import { API_BASE, http, request, withQuery } from './client';
+import { uploadFile, type UploadOpts } from './upload';
 import type {
+  Attachment,
   CreateGoalInput,
   CreateKeyResultInput,
   CreateProjectInput,
@@ -180,4 +182,20 @@ export const reportsApi = {
     http.get<WorkloadReport>('/reports/workload', query),
   /** Plain link (cookie-authenticated download), not fetched via JS. */
   projectCsvUrl: (id: string) => `${API_BASE}/projects/${id}/tasks.csv`,
+};
+
+export const attachmentsApi = {
+  /** Task-level, or a comment draft with `draft: true` (SPEC §13). */
+  upload: (taskId: string, file: File, opts: UploadOpts = {}) =>
+    uploadFile<Attachment>(`/tasks/${taskId}/attachments`, file, opts),
+  get: (id: string) => http.get<Attachment>(`/attachments/${id}`),
+  delete: (id: string) => http.delete(`/attachments/${id}`),
+};
+
+/** The server's relative paths, used as is (same origin); null when there's none. */
+export const attachmentUrls = {
+  content: (a: Pick<Attachment, 'contentPath'>) => a.contentPath,
+  download: (a: Pick<Attachment, 'contentPath'>) => (a.contentPath ? withQuery(a.contentPath, 'download', '1') : null),
+  thumbnail: (a: Pick<Attachment, 'thumbnailPath'>, size: 'small' | 'large') =>
+    a.thumbnailPath ? withQuery(a.thumbnailPath, 'size', size) : null,
 };

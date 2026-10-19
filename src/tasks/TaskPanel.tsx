@@ -3,6 +3,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ApiError } from '@/api/client';
 import { useProject, useTask } from '@/api/hooks';
+import { AttachmentsSection } from '@/attachments/AttachmentsSection';
+import { useAttachmentActions } from '@/attachments/useAttachments';
+import { pastedFiles, useFileDrop } from '@/attachments/useFileDrop';
 import type { TaskDetail } from '@/api/types';
 import { useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
@@ -257,6 +260,10 @@ export function TaskPanel({ taskId }: { taskId: string }) {
   const update = useUpdateTask();
   const elsewhere = useFollowWorkspace(task.data?.workspaceId, 'task');
   const switchTo = useSwitchWorkspace();
+  // Files dropped or pasted anywhere on the panel attach to the task (SPEC §13), for those who can edit it.
+  const canAttach = !!task.data && (task.data.projectId ? canEditProjectContent(project.data, me) : true);
+  const { attach } = useAttachmentActions({ id: taskId, projectId: task.data?.projectId ?? null });
+  const drop = useFileDrop(canAttach, attach);
 
   // Escape closes the panel (inputs stop propagation for their own Escape handling).
   useEffect(() => {
@@ -323,7 +330,25 @@ export function TaskPanel({ taskId }: { taskId: string }) {
   const sections = project.data?.sections ?? [];
 
   return (
-    <div className="flex h-full flex-col" role="dialog" aria-modal="false" aria-label={t.title}>
+    <div
+      className="relative flex h-full flex-col"
+      role="dialog"
+      aria-modal="false"
+      aria-label={t.title}
+      {...drop.bind}
+      onPaste={(e) => {
+        const files = canEdit ? pastedFiles(e) : [];
+        if (files.length) {
+          e.preventDefault();
+          attach(files);
+        }
+      }}
+    >
+      {drop.active && (
+        <div className="pointer-events-none absolute inset-0 z-20 m-2 flex items-center justify-center rounded-xl border-2 border-dashed border-primary-500 bg-primary-50/90 text-sm font-medium text-primary-700">
+          Drop to attach to this task
+        </div>
+      )}
       {header(
         <>
           <button
@@ -422,6 +447,8 @@ export function TaskPanel({ taskId }: { taskId: string }) {
               className="-mx-2 min-h-[4rem] text-sm"
             />
           </section>
+
+          <AttachmentsSection task={t} project={project.data} canEdit={canEdit} />
 
           {!t.parentId && <SubtaskList task={t} canEdit={canEdit} />}
 

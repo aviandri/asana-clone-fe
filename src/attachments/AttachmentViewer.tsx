@@ -16,31 +16,69 @@ const PdfViewer = lazy(() => import('./PdfViewer'));
 const TEXT_PREVIEW_BYTES = 1024 * 1024;
 const ZOOMS = [1, 1.5, 2, 3, 4];
 
+/**
+ * Reads at most [max] bytes and then stops the download: the Range request asks for only that
+ * much, and a server that ignores it doesn't get to send the rest.
+ */
+async function readCapped(res: Response, max: number): Promise<{ bytes: Uint8Array; cut: boolean }> {
+  if (!res.body) {
+    const all = new Uint8Array(await res.arrayBuffer());
+    return { bytes: all.slice(0, max), cut: all.length > max };
+  }
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (total < max) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+  }
+  const cut = total >= max;
+  if (cut) await reader.cancel().catch(() => undefined);
+  const bytes = new Uint8Array(Math.min(total, max));
+  let at = 0;
+  for (const c of chunks) {
+    const part = c.subarray(0, bytes.length - at);
+    bytes.set(part, at);
+    at += part.length;
+    if (at >= bytes.length) break;
+  }
+  return { bytes, cut };
+}
+
 function TextPreview({ url, size }: { url: string; size: number | null }) {
-  const [state, setState] = useState<{ text: string } | { error: true } | null>(null);
+  const [state, setState] = useState<{ text: string; cut: boolean } | { error: true } | null>(null);
   useEffect(() => {
+    // An empty file has no byte range to ask for (the server would answer 416).
+    if (size === 0) {
+      setState({ text: '', cut: false });
+      return;
+    }
     const controller = new AbortController();
-    fetch(url, { credentials: 'include', signal: controller.signal, headers: { Range: `bytes=0-${TEXT_PREVIEW_BYTES - 1}` } })
-      .then((res) => {
-        if (!res.ok) throw new Error(String(res.status));
-        return res.arrayBuffer();
-      })
-      .then((buf) => {
-        // A cut may split a character: decode leniently (never as HTML; it's put in a <pre>).
-        const text = new TextDecoder('utf-8', { fatal: false }).decode(buf.slice(0, TEXT_PREVIEW_BYTES));
-        setState({ text });
-      })
-      .catch((e: unknown) => {
-        if (!(e instanceof DOMException && e.name === 'AbortError')) setState({ error: true });
+    (async () => {
+      const res = await fetch(url, {
+        credentials: 'include',
+        signal: controller.signal,
+        headers: { Range: `bytes=0-${TEXT_PREVIEW_BYTES - 1}` },
       });
+      if (res.status === 416) return setState({ text: '', cut: false });
+      if (!res.ok) throw new Error(String(res.status));
+      const { bytes, cut } = await readCapped(res, TEXT_PREVIEW_BYTES);
+      // A cut may split a character: decode leniently (never as HTML; it's put in a <pre>).
+      setState({ text: new TextDecoder('utf-8', { fatal: false }).decode(bytes), cut: cut || (size ?? 0) > TEXT_PREVIEW_BYTES });
+    })().catch((e: unknown) => {
+      if (!(e instanceof DOMException && e.name === 'AbortError')) setState({ error: true });
+    });
     return () => controller.abort();
-  }, [url]);
+  }, [url, size]);
   if (!state) return <Spinner />;
   if ('error' in state) return <p className="text-sm text-gray-600">Couldn’t load this file.</p>;
+  if (!state.text) return <p className="text-sm text-gray-600">This file is empty.</p>;
   return (
     <div className="h-full w-full overflow-auto bg-white p-4">
       <pre className="whitespace-pre-wrap break-words font-mono text-xs text-gray-800">{state.text}</pre>
-      {(size ?? 0) > TEXT_PREVIEW_BYTES && <p className="mt-3 text-xs text-gray-500">Showing the first 1 MB. Download the file to see all of it.</p>}
+      {state.cut && <p className="mt-3 text-xs text-gray-500">Showing the first 1 MB. Download the file to see all of it.</p>}
     </div>
   );
 }
@@ -223,7 +261,7 @@ export function AttachmentViewer({
   // Gone (deleted elsewhere, or the task refetched without it): the viewer closes.
   const a = files.find((f) => f.id === viewingId) ?? null;
   return (
-    <Modal open={!!a} onClose={onClose} title={a?.name ?? 'Attachment'} className="max-w-5xl">
+    <Modal open={!!a} onClose={onClose} title={a?.name ?? 'Attachment'} width="5xl">
       {a && <ViewerBody key={a.id} a={a} files={files} onNavigate={onNavigate} canDelete={canDelete(a)} onDelete={() => onDelete(a)} />}
     </Modal>
   );

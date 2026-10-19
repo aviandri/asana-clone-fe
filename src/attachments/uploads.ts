@@ -13,15 +13,28 @@ export type UploadItem = {
   draft: boolean;
   name: string;
   size: number;
-  status: 'uploading' | 'failed';
+  /** queued: waiting for one of the 3 upload slots (§13 A12) */
+  status: 'queued' | 'uploading' | 'failed';
   /** 0–1 */
   progress: number;
+  /**
+   * The whole body is sent and the server is storing it. It can't be cancelled any more: the
+   * server would commit it anyway, and the UI would show a cancel that didn't happen.
+   */
+  finishing: boolean;
   error: string | null;
   /** false when retrying can't help (the file is over the limit) */
   retryable: boolean;
 };
 
-type Entry = { item: UploadItem; file: File; controller: AbortController | null; onUploaded: (a: Attachment) => void };
+type Entry = {
+  item: UploadItem;
+  file: File;
+  controller: AbortController | null;
+  onUploaded: (a: Attachment) => void;
+  /** Dropped from the list while finishing: still hand over the result (the owner decides). */
+  detached?: boolean;
+};
 
 // Module state, not component state: an upload keeps going (and stays listed) if the task panel
 // closes or switches tasks, and shows up again when that task reopens.
@@ -45,34 +58,61 @@ function update(id: string, patch: Partial<UploadItem>) {
 export function uploadErrorMessage(err: unknown, name: string): string {
   if (err instanceof ApiError) {
     if (err.status === 413 || err.code === 'PAYLOAD_TOO_LARGE') return `${name} is larger than 100 MB.`;
-    if (err.status === 429 || err.code === 'RATE_LIMITED') return 'Too many uploads. Try again in a few minutes.';
+    // A12: the server says which limit (concurrent uploads, unposted drafts); show its words.
+    if (err.status === 429 || err.code === 'RATE_LIMITED') return err.message || 'Too many uploads. Try again in a few minutes.';
+    if (err.status === 507 || err.code === 'INSUFFICIENT_STORAGE') return err.message || 'The server is out of storage space. Try again later.';
     if (err.status === 403) return 'You can’t add attachments here.';
   }
   return errorMessage(err, 'Upload failed.');
 }
 
+/** §13 A12: the server allows 3 concurrent uploads per user, so the client sends at most 3 and queues the rest. */
+export const MAX_CONCURRENT_UPLOADS = 3;
+let active = 0;
+
+/** Starts queued uploads, oldest first, while there's a free slot. */
+function pump() {
+  for (const [id, e] of entries) {
+    if (active >= MAX_CONCURRENT_UPLOADS) return;
+    if (e.item.status === 'queued') run(id);
+  }
+}
+
 function run(id: string) {
   const e = entries.get(id);
   if (!e) return;
+  active += 1;
+  let settled = false;
+  const release = () => {
+    if (settled) return;
+    settled = true;
+    active -= 1;
+    pump();
+  };
   const controller = new AbortController();
+  // Aborting frees the slot at once (the request is gone); the rejection that follows is ignored.
+  controller.signal.addEventListener('abort', release, { once: true });
   e.controller = controller;
-  update(id, { status: 'uploading', progress: 0, error: null });
+  update(id, { status: 'uploading', progress: 0, error: null, finishing: false });
   attachmentsApi
     .upload(e.item.taskId, e.file, {
       draft: e.item.draft,
       signal: controller.signal,
       onProgress: (fraction) => {
-        // Uploaded isn't stored yet: hold at 99% until the server answers.
-        const progress = Math.min(fraction, 0.99);
-        if (entries.get(id)?.item.status === 'uploading' && progress - (entries.get(id)?.item.progress ?? 0) >= 0.01) {
-          update(id, { progress });
+        const current = entries.get(id)?.item;
+        if (current?.status !== 'uploading') return;
+        // Sent isn't stored: hold at 99% ("Finishing…") until the server answers.
+        if (fraction >= 1) {
+          if (!current.finishing) update(id, { progress: 0.99, finishing: true });
+        } else if (fraction - current.progress >= 0.01) {
+          update(id, { progress: fraction });
         }
       },
     })
+    .finally(release)
     .then((attachment) => {
-      if (!entries.has(id)) return;
-      entries.delete(id);
-      emit();
+      if (!entries.has(id) && !e.detached) return;
+      if (entries.delete(id)) emit();
       e.onUploaded(attachment);
     })
     .catch((err: unknown) => {
@@ -100,29 +140,39 @@ export function startUpload(
     draft: !!opts.draft,
     name: file.name || 'file',
     size: file.size,
-    status: tooLarge ? 'failed' : 'uploading',
+    status: tooLarge ? 'failed' : 'queued',
     progress: 0,
+    finishing: false,
     error: tooLarge ? `${file.name || 'This file'} is larger than 100 MB.` : null,
     retryable: !tooLarge,
   };
   entries.set(id, { item, file, controller: null, onUploaded: opts.onUploaded });
   emit();
-  if (!tooLarge) run(id);
+  if (!tooLarge) pump();
   return id;
 }
 
-/** Stops an upload in flight (or forgets a failed one). */
+function drop(e: Entry, id: string) {
+  entries.delete(id);
+  // Too late to stop a finishing upload: let it land and hand it over, so it shows (or, for a
+  // composer that's gone, gets deleted) instead of silently existing on the server.
+  if (e.item.finishing) e.detached = true;
+  else e.controller?.abort();
+}
+
+/** Stops an upload in flight (or forgets a failed one). A finishing upload completes anyway. */
 export function cancelUpload(id: string) {
   const e = entries.get(id);
   if (!e) return;
-  entries.delete(id);
-  e.controller?.abort();
+  drop(e, id);
   emit();
 }
 
 export function retryUpload(id: string) {
   const e = entries.get(id);
-  if (e && e.item.status === 'failed' && e.item.retryable) run(id);
+  if (!e || e.item.status !== 'failed' || !e.item.retryable) return;
+  update(id, { status: 'queued', progress: 0, error: null });
+  pump();
 }
 
 function subscribe(l: () => void) {

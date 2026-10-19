@@ -152,7 +152,9 @@ function UploadRow({ u }: { u: UploadItem }) {
         <p className="truncate">
           <span className="font-medium text-gray-800">{u.name}</span> <span className="text-gray-500">{formatBytes(u.size)}</span>
         </p>
-        {u.status === 'uploading' ? (
+        {u.status === 'queued' ? (
+          <p className="mt-0.5 text-gray-500">Waiting to upload…</p>
+        ) : u.status === 'uploading' ? (
           <div
             role="progressbar"
             aria-label={`Uploading ${u.name}`}
@@ -169,7 +171,13 @@ function UploadRow({ u }: { u: UploadItem }) {
           </p>
         )}
       </div>
-      {u.status === 'uploading' ? (
+      {u.status === 'queued' ? (
+        <button type="button" className="btn-ghost px-2 py-1 text-xs" aria-label={`Cancel uploading ${u.name}`} onClick={() => cancelUpload(u.id)}>
+          Cancel
+        </button>
+      ) : u.status === 'uploading' && u.finishing ? (
+        <span className="px-2 text-xs text-gray-500">Finishing…</span>
+      ) : u.status === 'uploading' ? (
         <button type="button" className="btn-ghost px-2 py-1 text-xs" aria-label={`Cancel uploading ${u.name}`} onClick={() => cancelUpload(u.id)}>
           Cancel
         </button>

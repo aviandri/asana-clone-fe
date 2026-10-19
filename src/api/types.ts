@@ -218,6 +218,7 @@ export type ErrorCode =
   | 'GONE'
   | 'RATE_LIMITED'
   | 'PAYLOAD_TOO_LARGE'
+  | 'INSUFFICIENT_STORAGE'
   | 'INTERNAL';
 export type ErrorBody = { error: { code: ErrorCode; message: string; details?: unknown } };
 

@@ -44,6 +44,71 @@ jobs:
         run: |
           docker run --rm --add-host be:127.0.0.1 asana-clone-fe:ci \
             sh -c '/docker-entrypoint.d/20-envsubst-on-templates.sh && nginx -t'
+      - name: Check body limits through nginx (105m streamed on uploads, 2m buffered elsewhere)
+        run: |
+          set -euo pipefail
+          docker network create nginx-limits
+          # Stub backend: GET answers "ready"; POST drains the body and answers with its byte count.
+          docker run -d --name be --network nginx-limits python:3.12-alpine python -c '
+          import http.server
+          class H(http.server.BaseHTTPRequestHandler):
+              def reply(self, text):
+                  body = text.encode()
+                  self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers()
+                  self.wfile.write(body)
+              def do_GET(self):
+                  self.reply("ready")
+              def do_POST(self):
+                  left, got = int(self.headers.get("Content-Length", 0)), 0
+                  while left:
+                      chunk = self.rfile.read(min(left, 1 << 20))
+                      if not chunk:
+                          break
+                      got += len(chunk); left -= len(chunk)
+                  self.reply(str(got))
+          http.server.ThreadingHTTPServer(("0.0.0.0", 3000), H).serve_forever()'
+          docker run -d --name fe --network nginx-limits -p 8080:80 asana-clone-fe:ci
+          # Ready = nginx is up *and* proxies to the stub (a bare nginx check lets the first POST 502).
+          ready=
+          for i in $(seq 1 30); do
+            [ "$(curl -fsS localhost:8080/api/v1/ready 2>/dev/null || true)" = ready ] && { ready=1; break; }
+            sleep 1
+          done
+          [ -n "$ready" ] || { echo "nginx -> stub backend never became ready"; exit 1; }
+          head -c 52428800 /dev/zero > 50m.bin
+          head -c 115343360 /dev/zero > 110m.bin
+          head -c 3145728 /dev/zero > 3m.bin
+          head -c 1048576 /dev/zero > 1m.bin
+          # nginx logs "a client request body is buffered to a temporary file" for every buffered body
+          # over 16k, so the count tells streamed (unchanged) from buffered (+1) requests.
+          spooled() { docker logs fe 2>&1 | grep -c 'buffered to a temporary file' || true; }
+          # check <path> <file> <expected status> <streamed|buffered|-> <what>
+          check() {
+            local before code after
+            before=$(spooled)
+            code=$(curl -sS -o body.txt -w '%{http_code}' -X POST -H 'Content-Type: application/octet-stream' --data-binary @"$2" "localhost:8080$1" || true)
+            after=$(spooled)
+            echo "$1 $(stat -c %s "$2") bytes -> $code $( [ "$code" = 200 ] && cat body.txt )"
+            [ "$code" = "$3" ] || { echo "expected $3: $5"; exit 1; }
+            if [ "$code" = 200 ]; then
+              [ "$(cat body.txt)" = "$(stat -c %s "$2")" ] || { echo "body did not reach the backend intact: $5"; exit 1; }
+            fi
+            case "$4" in
+              streamed) [ "$after" = "$before" ] || { echo "expected a streamed body (no nginx temp file): $5"; exit 1; } ;;
+              buffered) [ "$after" -gt "$before" ] || { echo "expected nginx to buffer the body: $5"; exit 1; } ;;
+            esac
+          }
+          check /api/v1/tasks/t1/attachments 50m.bin 200 streamed "upload route streams 50 MB"
+          check '/api/v1/tasks/t1/attachments?draft=true' 50m.bin 200 streamed "draft upload (query string) streams"
+          check /api/v1/tasks/t1/attachments/link 3m.bin 200 streamed "link route has the upload limit"
+          check /api/v1/tasks/t1/attachments 110m.bin 413 - "upload route caps at 105m"
+          check /api/v1/tasks/t1/comments 1m.bin 200 buffered "other /api/ routes stay buffered"
+          check /api/v1/tasks/t1/comments 3m.bin 413 - "other /api/ routes keep 2m"
+          check /api/v1/tasks/t1/attachments/extra 3m.bin 413 - "the upload regex is anchored"
+          check /health 3m.bin 413 - "2m outside /api/"
+      - name: nginx and stub logs
+        if: failure()
+        run: docker logs fe || true; docker logs be || true
 
   e2e:
     # Playwright e2e (e2e/) against a real stack: BE main (migrated + full seed) on :3000 and this

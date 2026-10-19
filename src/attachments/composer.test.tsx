@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setFetch } from '@/api/client';
 import { setUploadTransport, type UploadTransport } from '@/api/upload';
-import { createMockUploadTransport } from '@/mocks/backend';
+import { createMockFetch, createMockUploadTransport } from '@/mocks/backend';
 import type { AttachmentRow } from '@/mocks/db';
 import { ADMIN, BOB, renderApp, setupMockApi } from '@/test/utils';
 import { linkUrlProblem } from './fileTypes';
@@ -261,5 +262,109 @@ describe('comment attachments in the viewer', () => {
     const viewer = await screen.findByRole('dialog', { name: 'option-b.png' });
     await u.click(within(viewer).getByRole('button', { name: 'Previous image' }));
     expect(await screen.findByRole('dialog', { name: 'header-mock.png' })).toBeInTheDocument();
+  });
+});
+
+/** Holds `POST /tasks/:id/comments` until released; everything else goes straight to the mock. */
+function gateComments(db: ReturnType<typeof setupMockApi>) {
+  const base = createMockFetch(() => db);
+  let open: () => void = () => undefined;
+  const held = new Promise<void>((r) => (open = r));
+  setFetch(async (input, init) => {
+    if (init?.method === 'POST' && /\/tasks\/[^/]+\/comments$/.test(input)) await held;
+    return base(input, init);
+  });
+  return { release: () => act(async () => open()) };
+}
+
+describe('posting with drafts (#30 review)', () => {
+  it('keeps a draft added during a slow post, and won’t remove the ones being sent', async () => {
+    const { db, task, dialog, composer } = await openTask();
+    const u = user();
+    await u.click(within(dialog).getByRole('textbox', { name: 'Add a comment' }));
+    await u.upload(composer().getByLabelText('Choose files for the comment'), file('sent.txt'));
+    await composer().findByRole('button', { name: 'Remove sent.txt' });
+    const gate = gateComments(db);
+    await u.click(composer().getByRole('button', { name: 'Comment' }));
+    expect(composer().getByRole('button', { name: 'Remove sent.txt' })).toBeDisabled();
+
+    // Attaching stays open while the post is in flight.
+    await u.click(composer().getByRole('button', { name: 'Add link to comment' }));
+    const form = composer().getByRole('form', { name: 'Add link to comment' });
+    await u.type(within(form).getByRole('textbox', { name: 'Link URL' }), 'https://www.figma.com/file/later');
+    await u.click(within(form).getByRole('button', { name: 'Add link' }));
+    await composer().findByRole('button', { name: 'Remove figma.com' });
+
+    await gate.release();
+    await waitFor(() => expect(composer().queryByRole('button', { name: 'Remove sent.txt' })).toBeNull());
+    const comment = db.comments.find((c) => c.taskId === task.id)!;
+    expect(db.attachments!.find((a) => a.name === 'sent.txt')?.commentId).toBe(comment.id);
+    // The late one is still a draft, still shown, and still cleaned up on leaving.
+    expect(composer().getByRole('button', { name: 'Remove figma.com' })).toBeEnabled();
+    const late = db.attachments!.find((a) => a.url === 'https://www.figma.com/file/later')!;
+    expect(late.draft).toBe(true);
+    await u.click(within(dialog).getByRole('button', { name: 'Close task details' }));
+    await waitFor(() => expect(db.attachments!.some((a) => a.id === late.id)).toBe(false));
+  });
+
+  it('keeps the chips when the server rejects attachmentIds', async () => {
+    const { db, dialog, composer } = await openTask();
+    const u = user();
+    await u.click(within(dialog).getByRole('textbox', { name: 'Add a comment' }));
+    await u.upload(composer().getByLabelText('Choose files for the comment'), file('gone.txt'));
+    await composer().findByRole('button', { name: 'Remove gone.txt' });
+    // Swept on the server meanwhile: the post fails with 400 on attachmentIds.
+    db.attachments = db.attachments!.filter((a) => a.name !== 'gone.txt');
+    await u.click(composer().getByRole('button', { name: 'Comment' }));
+    expect(await composer().findByText('Couldn’t post comment.')).toBeInTheDocument();
+    expect(composer().getByRole('button', { name: 'Remove gone.txt' })).toBeEnabled();
+    expect(db.comments.some((c) => c.body === '')).toBe(false);
+  });
+
+  it('clears failed upload chips once the comment is posted', async () => {
+    const { db, dialog, composer } = await openTask();
+    const real = createMockUploadTransport(() => db);
+    setUploadTransport(async (url, f, opts) =>
+      f.name === 'bad.txt' ? { status: 500, text: JSON.stringify({ error: { code: 'INTERNAL', message: 'Disk error' } }) } : real(url, f, opts),
+    );
+    const u = user();
+    await u.click(within(dialog).getByRole('textbox', { name: 'Add a comment' }));
+    await u.upload(composer().getByLabelText('Choose files for the comment'), [file('good.txt'), file('bad.txt')]);
+    await composer().findByRole('button', { name: 'Remove good.txt' });
+    expect(await composer().findByRole('alert')).toHaveTextContent('Disk error');
+    await u.click(composer().getByRole('button', { name: 'Comment' }));
+    await waitFor(() => expect(composer().queryByRole('button', { name: 'Remove good.txt' })).toBeNull());
+    expect(composer().queryByRole('button', { name: 'Dismiss bad.txt' })).toBeNull();
+  });
+
+  it('refuses a 21st attachment through Add link too', async () => {
+    const { db, dialog, composer } = await openTask();
+    const u = user();
+    await u.click(within(dialog).getByRole('textbox', { name: 'Add a comment' }));
+    await u.upload(composer().getByLabelText('Choose files for the comment'), Array.from({ length: 20 }, (_, i) => file(`n${i}.txt`)));
+    await waitFor(() => expect(db.attachments!.filter((a) => a.draft)).toHaveLength(20));
+    expect(composer().getByRole('button', { name: 'Add link to comment' })).toBeDisabled();
+    expect(db.attachments!.filter((a) => a.draft && a.kind === 'LINK')).toHaveLength(0);
+  });
+
+  it('keeps a paste that carries text as text in the comment box', async () => {
+    const { db, dialog } = await openTask();
+    const before = db.attachments!.length;
+    fireEvent.paste(within(dialog).getByRole('textbox', { name: 'Add a comment' }), {
+      clipboardData: { types: ['text/plain', 'Files'], files: [file('cells.png', 'image/png')], getData: () => 'A1\tB1' },
+    });
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(db.attachments!.length).toBe(before);
+  });
+
+  it('never links a non-http(s) link card in a comment', async () => {
+    const { dialog } = await openTask(ADMIN, (d) => {
+      const task = d.tasks.find((t) => t.title === HEADER)!;
+      const link = d.attachments!.find((a) => a.kind === 'LINK')!;
+      d.comments.push({ id: 'cmnt0000-0000-4000-8000-0000000000aa', taskId: task.id, authorId: link.uploaderId, body: 'see', createdAt: '2001-01-01T00:00:00.000Z', editedAt: null });
+      d.attachments!.push({ ...link, id: 'atch0000-0000-4000-8000-0000000000aa', url: ' JavaScript:alert(1)', title: 'Evil', commentId: 'cmnt0000-0000-4000-8000-0000000000aa' });
+    });
+    const inComment = await within(dialog).findByRole('list', { name: 'Attachments in this comment' });
+    expect(within(inComment).getByLabelText('Link, Evil').closest('a')).toBeNull();
   });
 });

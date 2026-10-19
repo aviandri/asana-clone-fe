@@ -4,7 +4,7 @@ import { FileTypeIcon } from './FileTypeIcon';
 import { formatBytes, hostOf } from './fileTypes';
 import { cancelUpload, retryUpload, type UploadItem } from './uploads';
 
-function DraftChip({ a, onRemove }: { a: Attachment; onRemove: () => void }) {
+function DraftChip({ a, onRemove, sending }: { a: Attachment; onRemove: () => void; sending: boolean }) {
   const name = a.kind === 'LINK' ? a.title || hostOf(a.url) || 'Link' : (a.name ?? 'file');
   return (
     <li className="flex max-w-[16rem] items-center gap-1.5 rounded-full border border-gray-200 bg-white py-0.5 pl-1 pr-1.5 text-xs">
@@ -17,7 +17,14 @@ function DraftChip({ a, onRemove }: { a: Attachment; onRemove: () => void }) {
       )}
       <span className="min-w-0 truncate">{name}</span>
       {a.kind !== 'LINK' && <span className="shrink-0 text-gray-500">{formatBytes(a.size)}</span>}
-      <button type="button" aria-label={`Remove ${name}`} className="shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800" onClick={onRemove}>
+      {/* Disabled while it's being posted: removing it would delete it from under the comment. */}
+      <button
+        type="button"
+        aria-label={`Remove ${name}`}
+        disabled={sending}
+        className="shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-100 hover:text-gray-800 disabled:opacity-40"
+        onClick={onRemove}
+      >
         <XIcon className="h-3 w-3" />
       </button>
     </li>
@@ -81,17 +88,20 @@ function UploadChip({ u }: { u: UploadItem }) {
 export function ComposerAttachments({
   drafts,
   uploads,
+  sending,
   onRemove,
 }: {
   drafts: Attachment[];
   uploads: UploadItem[];
+  /** ids in a comment being posted */
+  sending: ReadonlySet<string>;
   onRemove: (a: Attachment) => void;
 }) {
   if (drafts.length === 0 && uploads.length === 0) return null;
   return (
     <ul aria-label="Comment attachments" className="mt-2 flex flex-wrap gap-1.5">
       {drafts.map((a) => (
-        <DraftChip key={a.id} a={a} onRemove={() => onRemove(a)} />
+        <DraftChip key={a.id} a={a} sending={sending.has(a.id)} onRemove={() => onRemove(a)} />
       ))}
       {uploads.map((u) => (
         <UploadChip key={u.id} u={u} />

@@ -233,14 +233,19 @@ export function CommentComposer({ task }: { task: TaskDetail }) {
   const submit = () => {
     if (!canSend) return;
     const body = toApiBody(text);
+    // Exactly these ids go out; anything attached while the post is in flight stays for the next one.
+    const sent = attachmentIds;
+    drafts.beginPost(sent);
     add.mutate(
-      { body, attachmentIds },
+      { body, attachmentIds: sent },
       {
         onSuccess: () => {
           setText('');
           setPicked([]);
-          drafts.posted();
+          drafts.posted(sent);
         },
+        // The chips stay (and stay removable) so the comment can be sent again.
+        onError: drafts.postFailed,
       },
     );
   };
@@ -282,7 +287,11 @@ export function CommentComposer({ task }: { task: TaskDetail }) {
       className="relative flex gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3"
       {...drop.bind}
       onPaste={(e) => {
-        // A pasted file (a screenshot) attaches even in the text box; text pastes stay text.
+        // A pasted file (a screenshot) attaches even in the text box, but a paste that also carries
+        // text (Excel and Word put both on the clipboard) stays text there.
+        const el = e.target as HTMLElement;
+        const inField = el.tagName === 'TEXTAREA' || el.tagName === 'INPUT';
+        if (inField && Array.from(e.clipboardData?.types ?? []).includes('text/plain')) return;
         const files = pastedClipboardFiles(e);
         if (files.length) {
           e.preventDefault();
@@ -351,7 +360,7 @@ export function CommentComposer({ task }: { task: TaskDetail }) {
             if (picked.length) attachFiles(picked);
           }}
         />
-        <ComposerAttachments drafts={drafts.drafts} uploads={drafts.uploads} onRemove={drafts.remove} />
+        <ComposerAttachments drafts={drafts.drafts} uploads={drafts.uploads} sending={drafts.sending} onRemove={drafts.remove} />
         {addingLink && (
           <div className="mt-2">
             <LinkForm

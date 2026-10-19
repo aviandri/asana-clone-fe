@@ -162,9 +162,9 @@ export type Attachment = {
   /** Relative paths from the server; never built by hand. */
   contentPath: string | null;
   thumbnailPath: string | null;
-  /** LINK icon / og:image paths, null unless hasIcon / hasImage (§13 A11). Optional until BE ships them. */
-  iconPath?: string | null;
-  imagePath?: string | null;
+  /** LINK icon / og:image paths, null unless hasIcon / hasImage (§13 A11) */
+  iconPath: string | null;
+  imagePath: string | null;
 };
 
 export type CommentStory = {

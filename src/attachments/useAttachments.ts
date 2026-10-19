@@ -90,10 +90,13 @@ export function useAttachmentActions(task: Pick<TaskDetail, 'id' | 'projectId'>)
 
   const refreshPreview = useMutation({
     mutationFn: (a: Attachment) => attachmentsApi.refreshPreview(a.id),
-    onSuccess: (a) =>
+    onSuccess: (a) => {
       qc.setQueryData<TaskDetail>(qk.task(taskId), (t) =>
         t ? { ...t, attachments: (t.attachments ?? []).map((x) => (x.id === a.id ? a : x)) } : t,
-      ),
+      );
+      // A comment's link card shows the same attachment, from the stories.
+      void qc.invalidateQueries({ queryKey: qk.stories(taskId) });
+    },
   });
 
   return { attach, remove, addLink, refreshPreview };

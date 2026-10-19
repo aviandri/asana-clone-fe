@@ -208,10 +208,7 @@ export const attachmentUrls = {
   },
   thumbnail: (a: Pick<Attachment, 'thumbnailPath'>, size: 'small' | 'large') =>
     a.thumbnailPath ? withQuery(a.thumbnailPath, 'size', size) : null,
-  // Server-cached (clients never contact third-party hosts). §13 A11: the server's paths; the
-  // hand-built route is only for servers from before A11, and goes once BE sends the fields.
-  linkIcon: (a: Pick<Attachment, 'id' | 'hasIcon' | 'iconPath'>) =>
-    a.iconPath ?? (a.hasIcon ? `${API_BASE}/attachments/${a.id}/icon` : null),
-  linkImage: (a: Pick<Attachment, 'id' | 'hasImage' | 'imagePath'>) =>
-    a.imagePath ?? (a.hasImage ? `${API_BASE}/attachments/${a.id}/image` : null),
+  // Server-cached (clients never contact third-party hosts); the server's paths (§13 A11).
+  linkIcon: (a: Pick<Attachment, 'iconPath'>) => a.iconPath,
+  linkImage: (a: Pick<Attachment, 'imagePath'>) => a.imagePath,
 };

@@ -22,7 +22,9 @@
 // (also on failure). The v1.1 goals block (end of file) also creates "[fe-smoke]" goals, a
 // PRIVATE project and a goals-only team, and the §11 reports block a PRIVATE project; each block
 // deletes its own data in its `finally`. The v1.2 §12 block creates a "[fe-smoke]" workspace (deleted
-// at its end) and one throwaway user per run who ends with no workspace (users can't be deleted). It marks at most one of alice's smoke notifications as read
+// at its end) and one throwaway user per run who ends with no workspace (users can't be deleted). The
+// v1.3 §13 block uploads files into its own PRIVATE project (deleted at its end; see its header for
+// MAX_UPLOAD_BYTES, NGINX_MAX_BODY, SMOKE_LARGE, LIMITS_URL and FULL_URL). It marks at most one of alice's smoke notifications as read
 // and does not call read-all. Requires Node 20+ (global fetch, Headers#getSetCookie). Exit code 1 on
 // any failure.
 // Note: it performs 5 logins plus 1 accept-invite; keep AUTH_RATE_LIMIT_MAX ≥ 7/min for the test IP.
@@ -120,13 +122,17 @@ function check(value, schema, path = '$', out = []) {
 }
 
 // ---------- http with cookie jar per user ----------
-function client(label) {
+// `origin` lets the §13 block talk to the extra backends CI starts (LIMITS_URL / FULL_URL). Paths that
+// already start with /api/ (an Attachment's contentPath/thumbnailPath) are taken as origin-relative.
+// A FormData body is sent as is (multipart), anything else as JSON.
+function client(label, origin = ORIGIN) {
   let cookie = '';
-  return async function call(method, path, body, headers) {
-    const res = await fetch(BASE + path, {
+  async function call(method, path, body, headers) {
+    const raw = body instanceof FormData;
+    const res = await fetch(path.startsWith('/api/') ? origin + path : `${origin}/api/v1${path}`, {
       method,
-      headers: { ...(body !== undefined && { 'content-type': 'application/json' }), ...(cookie && { cookie }), ...headers },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { ...(body !== undefined && !raw && { 'content-type': 'application/json' }), ...(cookie && { cookie }), ...headers },
+      body: body === undefined ? undefined : raw ? body : JSON.stringify(body),
     });
     const set = res.headers.getSetCookie?.() ?? [];
     for (const c of set) {
@@ -139,7 +145,10 @@ function client(label) {
     let json;
     try { json = text ? JSON.parse(text) : undefined; } catch { json = text; }
     return { status: res.status, body: json, label, headers: res.headers, bytes };
-  };
+  }
+  call.cookie = () => cookie;
+  call.origin = origin;
+  return call;
 }
 
 const results = [];
@@ -266,6 +275,7 @@ try {
   await contractV11Goals({ aliceUser, bobUser, teamId }); // v1.1 §10, defined at the end of this file
   await contractV11Reports({ aliceUser, bobUser, teamId }); // v1.1 §11, defined at the end of this file
   await contractV12Workspaces({ aliceUser, bobUser }); // v1.2 §12, defined at the end of this file
+  await contractV13Attachments({ aliceUser, bobUser, teamId }); // v1.3 §13, defined at the end of this file
 } catch (e) {
   results.push({ name: 'UNCAUGHT', ok: false, problems: [String(e?.stack ?? e)] });
 } finally {
@@ -809,4 +819,292 @@ async function contractV12Workspaces({ aliceUser, bobUser }) {
       if (r.status !== 200) results.push({ name: `§12 cleanup: switch ${who} back to Mekari`, ok: false, problems: [`status ${r.status}`] });
     }
   }
+}
+
+// =====================================================================================
+// v1.3 §13 Attachments (owned by platform/QA). Files on a task and on comments: upload → list →
+// content (headers, Range, ETag) / thumbnail → delete, drafts + comment attachmentIds, permissions,
+// sniffing, filename sanitising, the size limit (A1) and the A12 quotas. LINK attachments (BE PR B)
+// are only shape-checked. Creates a PRIVATE project in the smoke team (admin OWNER, alice COMMENTER,
+// bob no access) and deletes it in `finally`.
+// Env (all optional):
+//   MAX_UPLOAD_BYTES   the backend's per-file limit (default 104857600, A1)
+//   NGINX_MAX_BODY     when BASE_URL is the FE nginx: its upload-route limit (105m); a body above it
+//                      must get nginx's own 413, a file between the two the backend's 413
+//   SMOKE_LARGE=0      skip the ~100 MB uploads (local runs over slow links)
+//   LIMITS_URL         a second backend on the same DB with UPLOAD_RATE_LIMIT_MAX=3 → 429 on the 4th
+//   FULL_URL           a second backend with STORAGE_MIN_FREE_BYTES above the disk size → 507
+// Per user it makes ~10 uploads on BASE_URL, so the default 60 / 10 min limit holds for ~5 runs.
+// =====================================================================================
+async function contractV13Attachments({ aliceUser, bobUser, teamId }) {
+  const { deflateSync } = await import('node:zlib');
+  const { createHash } = await import('node:crypto');
+  const MAX = Number(process.env.MAX_UPLOAD_BYTES ?? 104_857_600);
+  const NGINX_MAX = process.env.NGINX_MAX_BODY ? Number(process.env.NGINX_MAX_BODY) : null;
+  const LARGE = process.env.SMOKE_LARGE !== '0';
+  const Attachment = {
+    id: S, workspaceId: S, taskId: S, commentId: nul(S), kind: oneOf('FILE', 'LINK'), draft: B,
+    uploader: UserSummary, createdAt: S,
+    name: nul(S), mimeType: nul(S), size: nul(N), width: nul(N), height: nul(N), hasThumbnail: B,
+    url: nul(S), title: nul(S), description: nul(S), siteName: nul(S), provider: nul(S),
+    previewStatus: nul(oneOf('PENDING', 'READY', 'FAILED')), hasIcon: B, hasImage: B,
+    contentPath: nul(S), thumbnailPath: nul(S), iconPath: nul(S), imagePath: nul(S),
+  };
+  const Err = { error: { code: S, message: S, details: opt(any) } };
+  const code = (res) => res.body?.error?.code;
+  const same = (name, actual, expected) =>
+    results.push({ name, ok: JSON.stringify(actual) === JSON.stringify(expected), problems: [`got ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`] });
+  const truthy = (name, ok, detail) => results.push({ name, ok: Boolean(ok), problems: [detail] });
+  const form = (name, bytes, type = 'application/octet-stream', fields = {}) => {
+    const f = new FormData();
+    for (const [k, v] of Object.entries(fields)) f.append(k, v);
+    f.append('file', new Blob([bytes], { type }), name);
+    return f;
+  };
+  const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
+  const eq = (a, b) => a.length === b.length && Buffer.from(a).equals(Buffer.from(b));
+  const head = (res, h) => res.headers.get(h) ?? '';
+  let projectId;
+
+  try {
+    const proj = expect('§13 POST /projects (attachments)', await admin('POST', '/projects', { teamId, name: `${PREFIX} attachments`, privacy: 'PRIVATE' }), 201, any);
+    projectId = proj?.id;
+    expect('§13 alice COMMENTER on the project', await admin('POST', `/projects/${projectId}/members`, { userId: aliceUser.id, role: 'COMMENTER' }), 200, any);
+    const task = expect('§13 POST /tasks', await admin('POST', '/tasks', { title: `${PREFIX} with files`, projectId }), 201, any);
+    const T = task.id;
+    const png = makePng(64, 48, deflateSync);
+
+    // ---- upload → list ----
+    const up = expect('POST /tasks/:id/attachments (PNG)', await admin('POST', `/tasks/${T}/attachments`, form('screen shot.png', png, 'text/plain')), 201, Attachment);
+    same('PNG: sniffed type (client type ignored), size, dimensions, thumbnail, task-level',
+      [up?.kind, up?.mimeType, up?.size, up?.width, up?.height, up?.hasThumbnail, up?.draft, up?.commentId, up?.name],
+      ['FILE', 'image/png', png.length, 64, 48, true, false, null, 'screen shot.png']);
+    same('contentPath / thumbnailPath are server-given relative paths',
+      [up?.contentPath, up?.thumbnailPath], [`/api/v1/attachments/${up?.id}/content`, `/api/v1/attachments/${up?.id}/thumbnail`]);
+    const detail = expect('GET /tasks/:id (attachments)', await admin('GET', `/tasks/${T}`), 200, { attachments: arr(Attachment), attachmentCount: N });
+    same('TaskDetail.attachments + attachmentCount', [detail?.attachments?.map((a) => a.id), detail?.attachmentCount], [[up?.id], 1]);
+    const listed = (await admin('GET', `/projects/${projectId}/tasks`)).body?.data?.find((t) => t.id === T);
+    same('task list attachmentCount', listed?.attachmentCount, 1);
+    const stories = (await admin('GET', `/tasks/${T}/stories`)).body?.data ?? [];
+    truthy('ATTACHMENT_ADDED activity {attachmentId, kind, name}',
+      stories.some((s) => s.type === 'ATTACHMENT_ADDED' && s.data?.attachmentId === up?.id && s.data?.kind === 'FILE' && s.data?.name === 'screen shot.png'),
+      `types=${stories.map((s) => s.type ?? s.kind)}`);
+    expect('GET /attachments/:id', await admin('GET', `/attachments/${up?.id}`), 200, Attachment);
+
+    // ---- content: bytes + the security headers on every byte response ----
+    const content = await admin('GET', up.contentPath);
+    same('GET content → 200 and the exact bytes', [content.status, eq(content.bytes, png)], [200, true]);
+    const etag = head(content, 'etag');
+    same('content headers', {
+      type: head(content, 'content-type'), nosniff: head(content, 'x-content-type-options'),
+      corp: head(content, 'cross-origin-resource-policy'), ranges: head(content, 'accept-ranges'),
+      etag, disposition: head(content, 'content-disposition').split(';')[0],
+    }, { type: 'image/png', nosniff: 'nosniff', corp: 'same-origin', ranges: 'bytes', etag: `"${sha(png)}"`, disposition: 'inline' });
+    truthy('content CSP is a sandbox with default-src none', /\bsandbox\b/.test(head(content, 'content-security-policy')) && head(content, 'content-security-policy').includes("default-src 'none'"), head(content, 'content-security-policy'));
+    truthy('content Cache-Control private, must-revalidate', /private/.test(head(content, 'cache-control')) && /must-revalidate/.test(head(content, 'cache-control')), head(content, 'cache-control'));
+    const partial = await admin('GET', up.contentPath, undefined, { range: 'bytes=8-23' });
+    same('Range bytes=8-23 → 206, Content-Range, those 16 bytes',
+      [partial.status, head(partial, 'content-range'), eq(partial.bytes, png.subarray(8, 24))], [206, `bytes 8-23/${png.length}`, true]);
+    const suffix = await admin('GET', up.contentPath, undefined, { range: 'bytes=-4' });
+    same('Range bytes=-4 (suffix) → 206 with the last 4 bytes (IEND CRC)', [suffix.status, eq(suffix.bytes, png.subarray(png.length - 4))], [206, true]);
+    const beyond = await admin('GET', up.contentPath, undefined, { range: `bytes=${png.length}-` });
+    same('Range past the end → 416, Content-Range bytes */size', [beyond.status, head(beyond, 'content-range')], [416, `bytes */${png.length}`]);
+    const cached = await admin('GET', up.contentPath, undefined, { 'if-none-match': etag });
+    same('If-None-Match: the ETag → 304, still nosniff', [cached.status, head(cached, 'x-content-type-options')], [304, 'nosniff']);
+    const dl = await admin('GET', `${up.contentPath}?download=1`);
+    truthy('?download=1 → Content-Disposition attachment with the filename', dl.status === 200 && /^attachment;/.test(head(dl, 'content-disposition')) && head(dl, 'content-disposition').includes('screen'), head(dl, 'content-disposition'));
+    const foreignWs = await admin('GET', up.contentPath, undefined, { 'x-workspace-id': '00000000-0000-4000-8000-000000000000' });
+    same('byte routes ignore X-Workspace-Id', foreignWs.status, 200);
+
+    // ---- thumbnails ----
+    for (const size of ['small', 'large']) {
+      const th = await admin('GET', `${up.thumbnailPath}?size=${size}`);
+      const b = Buffer.from(th.bytes);
+      same(`GET thumbnail?size=${size} → 200 image/webp (RIFF…WEBP), nosniff`,
+        [th.status, head(th, 'content-type'), b.subarray(0, 4).toString('latin1'), b.subarray(8, 12).toString('latin1'), head(th, 'x-content-type-options')],
+        [200, 'image/webp', 'RIFF', 'WEBP', 'nosniff']);
+    }
+
+    // ---- visibility ----
+    expect('GET /attachments/:id without access (bob) → 404', await bob('GET', `/attachments/${up?.id}`), 404, Err);
+    const bobBytes = await bob('GET', up.contentPath);
+    same('content without access (bob) → 404, no bytes leaked', [bobBytes.status, eq(bobBytes.bytes, png)], [404, false]);
+    expect('content unauthenticated → 401', await client('anon')('GET', up.contentPath), 401, Err);
+
+    // ---- sniffing, inline allowlist, filenames ----
+    const text = new TextEncoder().encode('plain notes\nline 2\n');
+    const txt = expect('upload .txt', await admin('POST', `/tasks/${T}/attachments`, form('notes.txt', text)), 201, Attachment);
+    const txtRes = await admin('GET', txt.contentPath);
+    same('.txt → text/plain; charset=utf-8, inline', [txt?.mimeType, head(txtRes, 'content-type').replace(/\s/g, '').toLowerCase(), head(txtRes, 'content-disposition').split(';')[0]], ['text/plain', 'text/plain;charset=utf-8', 'inline']);
+    const html = new TextEncoder().encode('<!doctype html><html><body><script>alert(1)</script></body></html>');
+    const fake = expect('upload HTML named .png', await admin('POST', `/tasks/${T}/attachments`, form('innocent.png', html, 'image/png')), 201, Attachment);
+    const fakeRes = await admin('GET', fake.contentPath);
+    truthy('HTML disguised as .png: not image/png, no thumbnail, served as attachment',
+      fake?.mimeType !== 'image/png' && !fake?.hasThumbnail && /^attachment;/.test(head(fakeRes, 'content-disposition')) && head(fakeRes, 'x-content-type-options') === 'nosniff',
+      `mimeType=${fake?.mimeType} disposition=${head(fakeRes, 'content-disposition')}`);
+    const page = expect('upload .html', await admin('POST', `/tasks/${T}/attachments`, form('page.html', html, 'text/html')), 201, Attachment);
+    truthy('.html is never inline', /^attachment;/.test(head(await admin('GET', page.contentPath), 'content-disposition')), '');
+    const sneaky = expect('upload a filename with bidi controls and a path', await admin('POST', `/tasks/${T}/attachments`, form('../../etc/\u202Egnp.exe', text)), 201, Attachment);
+    same('filename sanitised: basename, bidi override stripped', sneaky?.name, 'gnp.exe');
+    const empty = expect('upload a 0-byte file', await admin('POST', `/tasks/${T}/attachments`, form('empty.txt', new Uint8Array(0))), 201, Attachment);
+    const emptyRes = await admin('GET', empty.contentPath);
+    same('0-byte file: size 0, content 200 with no bytes', [empty?.size, emptyRes.status, emptyRes.bytes.length], [0, 200, 0]);
+    expect('upload without multipart → 400', await admin('POST', `/tasks/${T}/attachments`, { file: 'x' }), 400, Err);
+
+    // ---- permissions, drafts and comment attachments ----
+    const denied = expect('COMMENTER task-level upload → 403', await alice('POST', `/tasks/${T}/attachments`, form('no.txt', text)), 403, Err);
+    same('403 code FORBIDDEN', denied?.error?.code, 'FORBIDDEN');
+    const draft = expect('COMMENTER draft upload (?draft=true) → 201', await alice('POST', `/tasks/${T}/attachments?draft=true`, form('draft.png', png)), 201, Attachment);
+    same('draft: draft true, no commentId', [draft?.draft, draft?.commentId], [true, null]);
+    expect('a draft is invisible to others (admin) → 404', await admin('GET', `/attachments/${draft?.id}`), 404, Err);
+    const withDraft = (await admin('GET', `/tasks/${T}`)).body;
+    truthy('drafts are not in TaskDetail.attachments or attachmentCount', !withDraft?.attachments?.some((a) => a.id === draft?.id) && withDraft?.attachmentCount === 6, `count=${withDraft?.attachmentCount}`);
+    const adminDraft = expect('admin draft (for the wrong-owner check)', await admin('POST', `/tasks/${T}/attachments?draft=true`, form('mine.txt', text)), 201, Attachment);
+    expect('comment with someone else\'s draft → 400', await alice('POST', `/tasks/${T}/comments`, { body: 'x', attachmentIds: [adminDraft?.id] }), 400, Err);
+    const comment = expect('POST comment with attachmentIds and an empty body (A9)', await alice('POST', `/tasks/${T}/comments`, { body: '', attachmentIds: [draft?.id] }), 201, { ...CommentStory, attachments: arr(Attachment) });
+    same('comment attachment: no longer a draft, has the commentId', [comment?.attachments?.[0]?.id, comment?.attachments?.[0]?.draft, comment?.attachments?.[0]?.commentId], [draft?.id, false, comment?.id]);
+    expect('posted comment attachment visible to admin', await admin('GET', `/attachments/${draft?.id}`), 200, Attachment);
+    const afterComment = (await admin('GET', `/tasks/${T}`)).body;
+    same('comment attachments appear in the task list and count', [afterComment?.attachments?.some((a) => a.id === draft?.id), afterComment?.attachmentCount], [true, 7]);
+    const storiesAfter = (await admin('GET', `/tasks/${T}/stories`)).body?.data ?? [];
+    truthy('no ATTACHMENT_ADDED activity for a comment attachment', !storiesAfter.some((s) => s.type === 'ATTACHMENT_ADDED' && s.data?.attachmentId === draft?.id), '');
+    truthy('the comment story carries its attachments', storiesAfter.find((s) => s.id === comment?.id)?.attachments?.[0]?.id === draft?.id, '');
+    expect('cleanup admin draft', await admin('DELETE', `/attachments/${adminDraft?.id}`), 204);
+
+    // ---- size limit (A1) ----
+    if (LARGE) {
+      const atLimit = await admin('POST', `/tasks/${T}/attachments`, form('exactly-100mb.bin', new Uint8Array(MAX)));
+      expect(`upload exactly MAX_UPLOAD_BYTES (${MAX}) → 201`, atLimit, 201, Attachment);
+      same('stored size = MAX', atLimit.body?.size, MAX);
+      if (atLimit.body?.id) expect('delete the 100 MB file', await admin('DELETE', `/attachments/${atLimit.body.id}`), 204);
+      const over = await upload413(admin, T, MAX + 1);
+      // Inside nginx's 105m, so through nginx too this is the backend's own 413 while nginx streams.
+      same(`upload MAX+1 bytes → backend 413 PAYLOAD_TOO_LARGE${NGINX_MAX ? ' (through nginx, streamed)' : ''}`, [over.status, over.code], [413, 'PAYLOAD_TOO_LARGE']);
+      if (NGINX_MAX) {
+        const band = await upload413(admin, T, Math.floor((MAX + NGINX_MAX) / 2) - 4096);
+        same('upload in the 100–105 MB band → backend 413 PAYLOAD_TOO_LARGE', [band.status, band.code], [413, 'PAYLOAD_TOO_LARGE']);
+        const huge = await upload413(admin, T, NGINX_MAX + 1024 * 1024);
+        same('upload above nginx client_max_body_size → nginx 413 (no JSON body)', [huge.status, huge.code], [413, undefined]);
+      }
+      const n = (await admin('GET', `/tasks/${T}`)).body?.attachmentCount;
+      same('rejected uploads leave no attachment behind', n, 7);
+    } else {
+      results.push({ name: 'SKIP size-limit uploads (SMOKE_LARGE=0)', ok: true, problems: [] });
+    }
+
+    // ---- A12: at most 3 concurrent uploads per user ----
+    const held = [0, 1, 2].map((i) => heldUpload(admin, T, `held-${i}.bin`));
+    await new Promise((r) => setTimeout(r, 1500)); // let the backend take the three slots
+    const fourth = await admin('POST', `/tasks/${T}/attachments`, form('fourth.txt', text));
+    same('4th concurrent upload → 429 RATE_LIMITED (A12)', [fourth.status, code(fourth)], [429, 'RATE_LIMITED']);
+    held.forEach((h) => h.release());
+    const heldDone = await Promise.all(held.map((h) => h.done));
+    same('the three held uploads then finish → 201', heldDone.map((r) => r.status), [201, 201, 201]);
+    for (const r of heldDone) if (r.body?.id) await admin('DELETE', `/attachments/${r.body.id}`);
+
+    // ---- A12 via extra backends CI runs on the same database ----
+    if (process.env.LIMITS_URL) {
+      const lim = client('admin@limits', process.env.LIMITS_URL.replace(/\/+$/, ''));
+      expect('limits backend: login', await lim('POST', '/auth/login', { email: ADMIN_EMAIL, password: PASSWORD }), 200, any);
+      const codes = [];
+      for (let i = 0; i < 4; i++) {
+        const r = await lim('POST', `/tasks/${T}/attachments`, form(`rate-${i}.txt`, text));
+        codes.push(r.status === 429 ? `429 ${code(r)}` : r.status);
+        if (r.body?.id) await lim('DELETE', `/attachments/${r.body.id}`);
+      }
+      same('UPLOAD_RATE_LIMIT_MAX=3: the 4th upload in the window → 429 RATE_LIMITED', codes, [201, 201, 201, '429 RATE_LIMITED']);
+    } else results.push({ name: 'SKIP upload rate limit (no LIMITS_URL)', ok: true, problems: [] });
+    if (process.env.FULL_URL) {
+      const full = client('admin@full', process.env.FULL_URL.replace(/\/+$/, ''));
+      expect('full-disk backend: login', await full('POST', '/auth/login', { email: ADMIN_EMAIL, password: PASSWORD }), 200, any);
+      const r = await full('POST', `/tasks/${T}/attachments`, form('nospace.txt', text));
+      same('free space below STORAGE_MIN_FREE_BYTES → 507 INSUFFICIENT_STORAGE (A12)', [r.status, code(r)], [507, 'INSUFFICIENT_STORAGE']);
+      same('507 leaves no attachment behind', (await admin('GET', `/tasks/${T}`)).body?.attachmentCount, 7);
+    } else results.push({ name: 'SKIP 507 insufficient storage (no FULL_URL)', ok: true, problems: [] });
+
+    // ---- delete ----
+    expect('DELETE by a COMMENTER who did not upload → 403', await alice('DELETE', `/attachments/${up?.id}`), 403, Err);
+    expect('DELETE /attachments/:id (uploader)', await admin('DELETE', `/attachments/${up?.id}`), 204);
+    expect('deleted attachment → 404', await admin('GET', `/attachments/${up?.id}`), 404, Err);
+    same('deleted content and thumbnail → 404', [(await admin('GET', up.contentPath)).status, (await admin('GET', up.thumbnailPath)).status], [404, 404]);
+    const final = (await admin('GET', `/tasks/${T}`)).body;
+    same('attachmentCount after delete', final?.attachmentCount, 6);
+    const removed = ((await admin('GET', `/tasks/${T}/stories`)).body?.data ?? []).filter((s) => s.type === 'ATTACHMENT_REMOVED');
+    truthy('ATTACHMENT_REMOVED activity {kind, name}', removed.some((s) => s.data?.kind === 'FILE' && s.data?.name === 'screen shot.png'), `removed=${JSON.stringify(removed.map((s) => s.data))}`);
+    expect('DELETE own comment attachment (alice, uploader)', await alice('DELETE', `/attachments/${draft?.id}`), 204);
+    const gone = ((await admin('GET', `/tasks/${T}/stories`)).body?.data ?? []).some((s) => s.id === comment?.id);
+    truthy('a comment that was only that attachment goes with it', !gone, '');
+  } catch (e) {
+    results.push({ name: 'UNCAUGHT (v1.3 attachments)', ok: false, problems: [String(e?.stack ?? e)] });
+  } finally {
+    if (projectId) expect('§13 cleanup DELETE project (attachments cascade)', await admin('DELETE', `/projects/${projectId}`), 204);
+  }
+
+  /** An upload expected to be refused for size; network errors (the server hanging up early) are reported, not thrown. */
+  async function upload413(call, taskId, bytes) {
+    try {
+      const r = await call('POST', `/tasks/${taskId}/attachments`, form(`big-${bytes}.bin`, new Uint8Array(bytes)));
+      return { status: r.status, code: code(r) };
+    } catch (e) {
+      return { status: `network error: ${e?.cause?.code ?? e?.cause?.message ?? e}`, code: undefined };
+    }
+  }
+
+  /** A multipart upload whose body stalls after 64 KiB until release(), to hold a backend upload slot. */
+  function heldUpload(call, taskId, name) {
+    const boundary = `----fe-smoke-${Math.random().toString(16).slice(2)}`;
+    const enc = new TextEncoder();
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    async function* body() {
+      yield enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
+      yield new Uint8Array(64 * 1024);
+      await gate;
+      yield new Uint8Array(1024);
+      yield enc.encode(`\r\n--${boundary}--\r\n`);
+    }
+    const done = fetch(`${call.origin}/api/v1/tasks/${taskId}/attachments`, {
+      method: 'POST', duplex: 'half', body: body(),
+      headers: { cookie: call.cookie(), 'content-type': `multipart/form-data; boundary=${boundary}` },
+    }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }), (e) => ({ status: `network error: ${e?.cause?.code ?? e}` }));
+    return { release, done };
+  }
+}
+
+/** A w×h truecolour PNG encoded with plain zlib (no image library), as a Buffer. */
+function makePng(w, h, deflate) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc32 = (buf) => {
+    let c = 0xffffffff;
+    for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc32(body), body.length + 4);
+    return out;
+  };
+  const rows = [];
+  for (let y = 0; y < h; y++) {
+    const row = Buffer.alloc(1 + w * 3);
+    for (let x = 0; x < w; x++) row.set([Math.floor((x * 255) / w), 37, 127], 1 + x * 3);
+    rows.push(row);
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', deflate(Buffer.concat(rows))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
 }

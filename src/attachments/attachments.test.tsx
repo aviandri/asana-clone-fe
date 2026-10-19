@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/api/client';
 import { setUploadTransport, uploadFile, type UploadTransport } from '@/api/upload';
 import type { AttachmentRow } from '@/mocks/db';
+import { createMockUploadTransport } from '@/mocks/backend';
 import { ADMIN, ALICE, BOB, renderApp, setupMockApi } from '@/test/utils';
 import { attachmentLabel, fileFamily, formatBytes, isHttpUrl, MAX_UPLOAD_BYTES, previewKind } from './fileTypes';
 import { resetUploads } from './uploads';
@@ -93,7 +94,6 @@ describe('attachments section', () => {
     await waitFor(() => expect(bar).toHaveAttribute('aria-valuenow', '40'));
 
     // The server stores it: answer with what the mock would.
-    const { createMockUploadTransport } = await import('@/mocks/backend');
     const real = await createMockUploadTransport(() => db)(calls[0].url, calls[0].file, { headers: {} });
     await calls[0].resolve(real.status, JSON.parse(real.text));
 
@@ -144,7 +144,6 @@ describe('attachments section', () => {
     expect(await section(dialog).findByRole('alert')).toHaveTextContent('Disk full');
     await u.click(section(dialog).getByRole('button', { name: 'Retry uploading two.txt' }));
     await waitFor(() => expect(calls).toHaveLength(3));
-    const { createMockUploadTransport } = await import('@/mocks/backend');
     const real = await createMockUploadTransport(() => db)(calls[2].url, calls[2].file, { headers: {} });
     await calls[2].resolve(real.status, JSON.parse(real.text));
     expect(await section(dialog).findByRole('button', { name: /Attachment, two\.txt/ })).toBeInTheDocument();
@@ -213,7 +212,7 @@ describe('attachment viewer', () => {
     expect(pre.tagName).toBe('PRE');
     expect(pre.textContent).toContain('<img src=x onerror=alert(1)>');
     expect(viewer.querySelector('pre img')).toBeNull();
-    expect(within(viewer).getByRole('link', { name: /Download/ })).toHaveAttribute('href', expect.stringContaining('download=1'));
+    expect(within(viewer).getByRole('link', { name: /Download/ })).toHaveAttribute('download', 'header-notes.txt');
   });
 
   it('zooms images and arrows through the task’s images only', async () => {
@@ -314,5 +313,182 @@ describe('attachment rules', () => {
     expect(seen).toEqual(['/api/v1/tasks/t1/attachments?draft=true']);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).code).toBe('PAYLOAD_TOO_LARGE');
+  });
+});
+
+describe('review fixes (#29)', () => {
+  it('never links javascript: URLs in any disguise', async () => {
+    const variants = [' javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'java\tscript:alert(1)', 'java\nscript:alert(1)', '\u0000javascript:alert(1)', 'javascript&colon;alert(1)'];
+    for (const v of variants) expect(isHttpUrl(v)).toBe(false);
+    const { dialog } = await openTask(HEADER, ADMIN, (db) => {
+      Object.assign(db.attachments!.find((a) => a.kind === 'LINK')!, { url: 'JaVa\tScRiPt:alert(1)', title: 'Sneaky' });
+    });
+    expect(within(dialog).getByLabelText('Link, Sneaky').closest('a')).toBeNull();
+  });
+
+  it('keeps keyboard focus in the viewer while the panel re-renders', async () => {
+    const { transport, calls } = manualTransport();
+    const { dialog } = await openTask();
+    setUploadTransport(transport);
+    const u = user();
+    await u.upload(within(dialog).getByLabelText('Choose files to attach'), file('slow.txt', 'text/plain'));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await u.click(section(dialog).getByRole('button', { name: /Attachment, header-mock\.png/ }));
+    const viewer = await screen.findByRole('dialog', { name: 'header-mock.png' });
+    const zoomIn = within(viewer).getByRole('button', { name: 'Zoom in' });
+    zoomIn.focus();
+    // Upload progress re-renders the section (and the viewer's parent) with a new onClose.
+    await calls[0].progress(0.3);
+    await calls[0].progress(0.6);
+    expect(document.activeElement).toBe(zoomIn);
+  });
+
+  it('closes the viewer on Escape, traps Tab, and gives focus back to the tile', async () => {
+    const { dialog } = await openTask();
+    const u = user();
+    const tile = section(dialog).getByRole('button', { name: /Attachment, header-notes\.txt/ });
+    await u.click(tile);
+    const viewer = await screen.findByRole('dialog', { name: 'header-notes.txt' });
+    const focusables = [...viewer.querySelectorAll<HTMLElement>('a[href], button:not([disabled])')];
+    focusables[focusables.length - 1].focus();
+    await u.tab();
+    expect(document.activeElement).toBe(focusables[0]);
+    await u.keyboard('{Shift>}{Tab}{/Shift}');
+    expect(document.activeElement).toBe(focusables[focusables.length - 1]);
+    await u.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'header-notes.txt' })).toBeNull());
+    expect(document.activeElement).toBe(tile);
+    // Escape closed only the viewer, not the task panel.
+    expect(screen.getByRole('dialog', { name: HEADER })).toBeInTheDocument();
+  });
+
+  it('offers Delete in the viewer only to those allowed', async () => {
+    const asCommenter = await openTask(HEADER, BOB, (db) => {
+      const task = db.tasks.find((t) => t.title === HEADER)!;
+      const bob = db.users.find((x) => x.email === BOB)!;
+      db.projectMembers.push({ projectId: task.projectId!, userId: bob.id, role: 'COMMENTER' });
+    });
+    await user().click(section(asCommenter.dialog).getByRole('button', { name: /Attachment, header-notes\.txt/ }));
+    const viewer = await screen.findByRole('dialog', { name: 'header-notes.txt' });
+    expect(within(viewer).getByRole('link', { name: /Download/ })).toBeInTheDocument();
+    expect(within(viewer).queryByRole('button', { name: /Delete/ })).toBeNull();
+  });
+
+  it('ignores pasted files for COMMENTERs', async () => {
+    const { dialog, db } = await openTask(HEADER, BOB, (d) => {
+      const task = d.tasks.find((t) => t.title === HEADER)!;
+      const bob = d.users.find((x) => x.email === BOB)!;
+      d.projectMembers.push({ projectId: task.projectId!, userId: bob.id, role: 'COMMENTER' });
+    });
+    const before = db.attachments!.length;
+    fireEvent.paste(dialog, { clipboardData: { files: [file('x.png', 'image/png')] } });
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(db.attachments!.length).toBe(before);
+    expect(section(dialog).queryByRole('progressbar')).toBeNull();
+  });
+
+  it('shows “Finishing…” without Cancel once the whole file is sent', async () => {
+    const { transport, calls } = manualTransport();
+    const { dialog } = await openTask();
+    setUploadTransport(transport);
+    await user().upload(within(dialog).getByLabelText('Choose files to attach'), file('big.txt', 'text/plain'));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(section(dialog).getByRole('button', { name: 'Cancel uploading big.txt' })).toBeInTheDocument();
+    await calls[0].progress(1);
+    expect(section(dialog).getByText('Finishing…')).toBeInTheDocument();
+    expect(section(dialog).queryByRole('button', { name: 'Cancel uploading big.txt' })).toBeNull();
+    expect(calls[0].signal?.aborted).toBe(false);
+  });
+
+  it('ignores files dropped or pasted on the open viewer (they bubble through the portal)', async () => {
+    const { dialog, db, task } = await openTask();
+    await user().click(section(dialog).getByRole('button', { name: /Attachment, header-mock\.png/ }));
+    const viewer = await screen.findByRole('dialog', { name: 'header-mock.png' });
+    const dataTransfer = { types: ['Files'], files: [file('stray.png', 'image/png')], dropEffect: 'none' };
+    fireEvent.dragEnter(viewer, { dataTransfer });
+    expect(screen.queryByText('Drop to attach to this task')).toBeNull();
+    fireEvent.drop(viewer, { dataTransfer });
+    fireEvent.paste(viewer, { clipboardData: { files: [file('stray2.png', 'image/png')] } });
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(db.attachments!.filter((a) => a.taskId === task.id)).toHaveLength(3);
+  });
+
+  it('asks for the first 1 MB of text and stops reading there', async () => {
+    const { dialog } = await openTask(HEADER, ADMIN, (db) => {
+      Object.assign(db.attachments!.find((a) => a.name === 'header-notes.txt')!, { contentUrl: 'http://files.test/big.txt', size: 3 * 1024 * 1024 });
+    });
+    let range: string | null = null;
+    let sent = 0;
+    let cancelled = false;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      range = (init?.headers as Record<string, string> | undefined)?.Range ?? null;
+      const chunk = new TextEncoder().encode('a'.repeat(64 * 1024));
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent >= 3 * 1024 * 1024) return controller.close();
+          sent += chunk.length;
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      return new Response(body, { status: 200 });
+    });
+    await user().click(section(dialog).getByRole('button', { name: /Attachment, header-notes\.txt/ }));
+    const viewer = await screen.findByRole('dialog', { name: 'header-notes.txt' });
+    expect(await within(viewer).findByText('Showing the first 1 MB. Download the file to see all of it.')).toBeInTheDocument();
+    expect(range).toBe('bytes=0-1048575');
+    expect(viewer.querySelector('pre')!.textContent).toHaveLength(1024 * 1024);
+    expect(cancelled).toBe(true);
+    expect(sent).toBeLessThan(2 * 1024 * 1024);
+  });
+
+  it('shows an empty file as empty, without asking for a byte range', async () => {
+    const { dialog } = await openTask(HEADER, ADMIN, (db) => {
+      Object.assign(db.attachments!.find((a) => a.name === 'header-notes.txt')!, { size: 0 });
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await user().click(section(dialog).getByRole('button', { name: /Attachment, header-notes\.txt/ }));
+    const viewer = await screen.findByRole('dialog', { name: 'header-notes.txt' });
+    expect(within(viewer).getByText('This file is empty.')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('sends at most 3 uploads at once and queues the rest (§13 A12)', async () => {
+    const { transport, calls } = manualTransport();
+    const { dialog, db } = await openTask();
+    setUploadTransport(transport);
+    const u = user();
+    await u.upload(within(dialog).getByLabelText('Choose files to attach'), [1, 2, 3, 4, 5].map((n) => file(`q${n}.txt`, 'text/plain')));
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expect(section(dialog).getAllByText('Waiting to upload…')).toHaveLength(2);
+    // A queued upload cancels without ever being sent.
+    await u.click(section(dialog).getByRole('button', { name: 'Cancel uploading q5.txt' }));
+    const real = await createMockUploadTransport(() => db)(calls[0].url, calls[0].file, { headers: {} });
+    await calls[0].resolve(real.status, JSON.parse(real.text));
+    await waitFor(() => expect(calls).toHaveLength(4));
+    expect(calls[3].file.name).toBe('q4.txt');
+    // A cancelled one frees its slot too.
+    await u.click(section(dialog).getByRole('button', { name: 'Cancel uploading q2.txt' }));
+    await act(() => new Promise((r) => setTimeout(r, 20)));
+    expect(calls).toHaveLength(4);
+    expect(section(dialog).queryByText('Waiting to upload…')).toBeNull();
+  });
+
+  it('shows the server’s words for 429 and 507, and lets 507 be retried', async () => {
+    const { transport, calls } = manualTransport();
+    const { dialog } = await openTask();
+    setUploadTransport(transport);
+    await user().upload(within(dialog).getByLabelText('Choose files to attach'), [file('r.txt', 'text/plain'), file('s.txt', 'text/plain')]);
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await calls[0].resolve(429, { error: { code: 'RATE_LIMITED', message: 'You have 1 GiB of unposted drafts. Post or remove some first.' } });
+    await calls[1].resolve(507, { error: { code: 'INSUFFICIENT_STORAGE', message: 'The server is almost out of space.' } });
+    const alerts = await section(dialog).findAllByRole('alert');
+    expect(alerts.map((a) => a.textContent)).toEqual([
+      'You have 1 GiB of unposted drafts. Post or remove some first.',
+      'The server is almost out of space.',
+    ]);
+    expect(section(dialog).getByRole('button', { name: 'Retry uploading s.txt' })).toBeInTheDocument();
   });
 });

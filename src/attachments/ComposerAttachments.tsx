@@ -30,7 +30,14 @@ function UploadChip({ u }: { u: UploadItem }) {
     <li className="flex max-w-[18rem] items-center gap-1.5 rounded-full border border-gray-200 bg-white py-0.5 pl-1 pr-1.5 text-xs">
       <FileTypeIcon mimeType={null} name={u.name} size="sm" />
       <span className="min-w-0 truncate">{u.name}</span>
-      {u.status === 'uploading' ? (
+      {u.status === 'queued' ? (
+        <>
+          <span className="shrink-0 text-gray-500">Waiting…</span>
+          <button type="button" aria-label={`Cancel uploading ${u.name}`} className="shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-100" onClick={() => cancelUpload(u.id)}>
+            <XIcon className="h-3 w-3" />
+          </button>
+        </>
+      ) : u.status === 'uploading' ? (
         <>
           <span
             role="progressbar"
@@ -42,9 +49,14 @@ function UploadChip({ u }: { u: UploadItem }) {
           >
             <span className="block h-full bg-primary-500 transition-[width] duration-200" style={{ width: `${pct}%` }} />
           </span>
-          <button type="button" aria-label={`Cancel uploading ${u.name}`} className="shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-100" onClick={() => cancelUpload(u.id)}>
-            <XIcon className="h-3 w-3" />
-          </button>
+          {/* Fully sent: the server is storing it, so it can't be cancelled any more. */}
+          {u.finishing ? (
+            <span className="shrink-0 text-gray-500">Finishing…</span>
+          ) : (
+            <button type="button" aria-label={`Cancel uploading ${u.name}`} className="shrink-0 rounded-full p-0.5 text-gray-500 hover:bg-gray-100" onClick={() => cancelUpload(u.id)}>
+              <XIcon className="h-3 w-3" />
+            </button>
+          )}
         </>
       ) : (
         <>

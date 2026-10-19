@@ -73,7 +73,7 @@ export function SearchPalette({ open, onClose }: { open: boolean; onClose: () =>
   };
 
   return (
-    <Modal open={open} onClose={close} title="Search" hideTitle position="top" className="max-w-xl">
+    <Modal open={open} onClose={close} title="Search" hideTitle position="top" width="xl">
       <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
         <SearchIcon className="h-5 w-5 text-gray-500" />
         <input

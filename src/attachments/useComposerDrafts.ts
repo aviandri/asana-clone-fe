@@ -70,7 +70,8 @@ export function useComposerDrafts(task: Pick<TaskDetail, 'id'>) {
   return {
     drafts,
     uploads,
-    uploading: uploads.some((u) => u.status === 'uploading'),
+    // Queued or in flight: Send waits for them (§13).
+    uploading: uploads.some((u) => u.status !== 'failed'),
     full: room === 0,
     attachFiles,
     addLink,

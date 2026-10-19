@@ -34,11 +34,16 @@ async function openTask(loginAs = ADMIN, prepare?: (db: ReturnType<typeof setupM
 /** Uploads wait until the test lets them through; the mock stores them then. */
 function gatedTransport(getDb: () => ReturnType<typeof setupMockApi>) {
   const real = createMockUploadTransport(getDb);
-  const gates: { url: string; release: () => Promise<void>; signal?: AbortSignal }[] = [];
+  const gates: { url: string; release: () => Promise<void>; progress: (f: number) => Promise<void>; signal?: AbortSignal }[] = [];
   const transport: UploadTransport = (url, f, opts) =>
     new Promise((resolve, reject) => {
       opts.signal?.addEventListener('abort', () => reject(new DOMException('Upload cancelled', 'AbortError')));
-      gates.push({ url, signal: opts.signal, release: () => act(async () => resolve(await real(url, f, { headers: opts.headers }))) });
+      gates.push({
+        url,
+        signal: opts.signal,
+        progress: (p) => act(async () => opts.onProgress?.(p)),
+        release: () => act(async () => resolve(await real(url, f, { headers: opts.headers }))),
+      });
     });
   return { transport, gates };
 }
@@ -98,6 +103,26 @@ describe('comment composer attachments', () => {
     await u.click(within(dialog).getByRole('button', { name: 'Close task details' }));
     await waitFor(() => expect(db.attachments!.some((a) => a.taskId === task.id && a.name === 'b.txt')).toBe(false));
     expect(gates[0].signal?.aborted).toBe(true);
+  });
+
+  it('deletes a draft that finishes uploading after the composer went away', async () => {
+    const { db, dialog, composer } = await openTask();
+    const { transport, gates } = gatedTransport(() => db);
+    setUploadTransport(transport);
+    const u = user();
+    await u.click(within(dialog).getByRole('textbox', { name: 'Add a comment' }));
+    await u.upload(composer().getByLabelText('Choose files for the comment'), file('late.txt'));
+    await waitFor(() => expect(gates).toHaveLength(1));
+    await gates[0].progress(1);
+    expect(composer().getByText('Finishing…')).toBeInTheDocument();
+    expect(composer().queryByRole('button', { name: 'Cancel uploading late.txt' })).toBeNull();
+    expect(composer().getByRole('button', { name: 'Comment' })).toBeDisabled();
+
+    await u.click(within(dialog).getByRole('button', { name: 'Close task details' }));
+    // Too late to abort: it lands, and is deleted rather than left as an orphan draft.
+    expect(gates[0].signal?.aborted).toBe(false);
+    await gates[0].release();
+    await waitFor(() => expect(db.attachments!.some((a) => a.name === 'late.txt')).toBe(false));
   });
 
   it('adds a link to a comment, checking it first', async () => {

@@ -213,6 +213,7 @@ export const attachmentRoutes: [string, string, Handler][] = [
       const { a, t } = visibleAttachment(db, params.id, me!);
       if (!canDelete(db, a, t, me!)) throw forbidden();
       db.attachments = table(db).filter((x) => x.id !== a.id);
+      if (a.contentUrl?.startsWith('blob:') && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(a.contentUrl);
       if (!a.draft && !a.commentId) {
         activity(db, t.id, me!.id, 'ATTACHMENT_REMOVED', { kind: a.kind, name: a.kind === 'LINK' ? (a.title ?? a.url) : a.name });
         touch(t);

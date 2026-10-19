@@ -66,7 +66,7 @@ export function NewGoalDialog({
   };
 
   return (
-    <Modal open onClose={onClose} title="New goal" className="max-w-lg">
+    <Modal open onClose={onClose} title="New goal" width="lg">
       <form onSubmit={submit} className="space-y-4 px-5 pb-5 pt-3">
         <div>
           <label htmlFor="ng-title" className="label">Goal title</label>

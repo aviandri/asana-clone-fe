@@ -201,7 +201,11 @@ export const attachmentsApi = {
 /** The server's relative paths, used as is (same origin); null when there's none. */
 export const attachmentUrls = {
   content: (a: Pick<Attachment, 'contentPath'>) => a.contentPath,
-  download: (a: Pick<Attachment, 'contentPath'>) => (a.contentPath ? withQuery(a.contentPath, 'download', '1') : null),
+  download: (a: Pick<Attachment, 'contentPath'>) => {
+    if (!a.contentPath) return null;
+    // The mock backend's in-browser blob:/data: URLs take no query (the `download` attribute saves them).
+    return /^(blob|data):/.test(a.contentPath) ? a.contentPath : withQuery(a.contentPath, 'download', '1');
+  },
   thumbnail: (a: Pick<Attachment, 'thumbnailPath'>, size: 'small' | 'large') =>
     a.thumbnailPath ? withQuery(a.thumbnailPath, 'size', size) : null,
   // Server-cached (clients never contact third-party hosts). §13 A11: the server's paths; the

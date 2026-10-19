@@ -45,7 +45,7 @@ export function LinkCard({ a, compact = false }: { a: Attachment; compact?: bool
         <LinkGlyph a={a} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-xs font-medium text-gray-800">{title}</span>
-          <span className="block truncate text-[11px] text-gray-500">{site}</span>
+          {site && site !== title && <span className="block truncate text-[11px] text-gray-500">{site}</span>}
           {a.previewStatus === 'PENDING' && <span className="block text-[11px] text-gray-500">Fetching preview…</span>}
           {!compact && a.description && <span className="mt-0.5 line-clamp-2 block text-[11px] text-gray-600">{a.description}</span>}
         </span>

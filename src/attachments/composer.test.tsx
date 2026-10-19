@@ -224,7 +224,8 @@ describe('links on the task', () => {
     });
     const section = within(within(dialog).getByRole('region', { name: 'Attachments' }));
     const card = section.getByRole('link', { name: 'Link, https://docs.example.org/page' });
-    expect(within(card).getAllByText('docs.example.org')).toHaveLength(2);
+    // No fetched title or site: the domain stands in, once.
+    expect(within(card).getAllByText('docs.example.org')).toHaveLength(1);
     const u = user();
     await u.click(section.getByRole('button', { name: 'More actions for https://docs.example.org/page' }));
     await u.click(screen.getByRole('button', { name: 'Refresh preview' }));

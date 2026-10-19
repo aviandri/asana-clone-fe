@@ -4,20 +4,35 @@ server {
     server_name _;
     root /usr/share/nginx/html;
 
-    # JSON and everything else; uploads get their own limit on /api/ below.
+    # JSON and everything else; only the attachment upload routes below accept more.
     client_max_body_size 2m;
+    # Max gap between two reads of a request body (nginx's default, made explicit): a client that
+    # stalls longer gets 408, so a trickled body can't hold a connection open indefinitely.
+    client_body_timeout 60s;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 
-    location /api/ {
-        # Attachments (SPEC §13): the backend enforces 100 MB per file and answers 413 itself; this
-        # leaves room for multipart overhead. JSON routes keep the backend's own small bodyLimit.
+    # Attachment uploads (SPEC §13): POST /tasks/:id/attachments[?draft=true] and …/attachments/link.
+    # The backend enforces 100 MB per file (MAX_UPLOAD_BYTES) and answers its own 413; 105m leaves
+    # room for multipart overhead. Bodies stream to the backend as they arrive instead of being
+    # spooled to disk first, so it can abort an oversized upload early. Regex locations win over
+    # the /api/ prefix below; BACKEND_URL must have no path part here (nginx rejects one).
+    location ~ ^/api/v1/tasks/[^/]+/attachments(/link)?$ {
         client_max_body_size 105m;
-        # Stream request bodies to the backend as they arrive instead of spooling them to disk
-        # first, so the backend sees upload progress and can abort an oversized upload early.
         proxy_request_buffering off;
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
+        proxy_pass ${BACKEND_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # The rest of the API: 2m bodies, buffered by nginx before they reach the backend.
+    location /api/ {
+        proxy_read_timeout 300s;
         proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;

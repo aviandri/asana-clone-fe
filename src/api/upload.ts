@@ -36,6 +36,12 @@ const xhrTransport: UploadTransport = (url, file, { headers, onProgress, signal 
 
 let transport: UploadTransport = xhrTransport;
 
+const BODILESS: Record<number, { code: ApiError['code']; message: string }> = {
+  413: { code: 'PAYLOAD_TOO_LARGE', message: 'This file is larger than 100 MB.' },
+  429: { code: 'RATE_LIMITED', message: 'Too many uploads. Try again in a few minutes.' },
+  507: { code: 'INSUFFICIENT_STORAGE', message: 'The server is out of storage space. Try again later.' },
+};
+
 /** Swap the upload transport (the mock backend and tests). */
 export function setUploadTransport(t: UploadTransport | null) {
   transport = t ?? xhrTransport;
@@ -57,9 +63,11 @@ export async function uploadFile<T>(path: string, file: File, opts: UploadOpts =
     json = undefined;
   }
   if (res.status < 200 || res.status >= 300) {
-    // A proxy's own 413 page carries no error body: still the size limit.
-    if (res.status === 413 && !(json as { error?: unknown } | undefined)?.error) {
-      throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'This file is larger than 100 MB.');
+    // A proxy's own error page carries no error body: still say what the status means, not
+    // "Request failed".
+    if (!(json as { error?: unknown } | undefined)?.error) {
+      const known = BODILESS[res.status];
+      if (known) throw new ApiError(res.status, known.code, known.message);
     }
     throw failure(path, res.status, json);
   }

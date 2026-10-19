@@ -28,13 +28,14 @@ async function readCapped(res: Response, max: number): Promise<{ bytes: Uint8Arr
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (total < max) {
+  // Read one byte past the cap at most: a file of exactly [max] bytes isn't cut, only a longer one.
+  while (total <= max) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
     total += value.length;
   }
-  const cut = total >= max;
+  const cut = total > max;
   if (cut) await reader.cancel().catch(() => undefined);
   const bytes = new Uint8Array(Math.min(total, max));
   let at = 0;

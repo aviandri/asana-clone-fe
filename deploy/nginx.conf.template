@@ -4,11 +4,20 @@ server {
     server_name _;
     root /usr/share/nginx/html;
 
+    # JSON and everything else; uploads get their own limit on /api/ below.
     client_max_body_size 2m;
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 
     location /api/ {
+        # Attachments (SPEC §13): the backend enforces 100 MB per file and answers 413 itself; this
+        # leaves room for multipart overhead. JSON routes keep the backend's own small bodyLimit.
+        client_max_body_size 105m;
+        # Stream request bodies to the backend as they arrive instead of spooling them to disk
+        # first, so the backend sees upload progress and can abort an oversized upload early.
+        proxy_request_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
         proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
         proxy_set_header Host $host;

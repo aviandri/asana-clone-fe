@@ -1,5 +1,6 @@
 import { setFetch } from '@/api/client';
-import { createMockFetch } from './backend';
+import { setUploadTransport } from '@/api/upload';
+import { createMockFetch, createMockUploadTransport } from './backend';
 import { createSeedDb, type MockDb } from './db';
 
 const STORAGE_KEY = 'mekari-project:mock-db:v2'; // v2: workspaces (SPEC §12)
@@ -26,6 +27,7 @@ function save(db: MockDb) {
 export function enableMocking() {
   let db = load();
   setFetch(createMockFetch(() => db, { latencyMs: 120, onChange: save }));
+  setUploadTransport(createMockUploadTransport(() => db, { latencyMs: 1200, onChange: save }));
   // Handy from devtools: __resetMockDb()
   (window as unknown as { __resetMockDb: () => void }).__resetMockDb = () => {
     db = createSeedDb();

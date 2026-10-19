@@ -84,3 +84,21 @@ export const TargetIcon = (p: P) => (
 export const ChartIcon = (p: P) => (
   <svg {...base(p)}><path d="M3 3v18h18" /><path d="M7 16v-4M12 16V8M17 16v-7" /></svg>
 );
+export const PaperclipIcon = (p: P) => (
+  <svg {...base(p)}><path d="m21 11.5-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2" /></svg>
+);
+export const FileIcon = (p: P) => (
+  <svg {...base(p)}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></svg>
+);
+export const DownloadIcon = (p: P) => (
+  <svg {...base(p)}><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14" /></svg>
+);
+export const ExternalLinkIcon = (p: P) => (
+  <svg {...base(p)}><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
+);
+export const LinkIcon = (p: P) => (
+  <svg {...base(p)}><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
+);
+export const ChevronLeftIcon = (p: P) => (
+  <svg {...base(p)}><path d="m15 6-6 6 6 6" /></svg>
+);

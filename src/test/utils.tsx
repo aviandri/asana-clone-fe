@@ -2,9 +2,10 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { setFetch } from '@/api/client';
+import { setUploadTransport } from '@/api/upload';
 import { routes } from '@/routes';
 import { createQueryClient } from '@/lib/queryClient';
-import { createMockFetch } from '@/mocks/backend';
+import { createMockFetch, createMockUploadTransport } from '@/mocks/backend';
 import { createSeedDb, type MockDb } from '@/mocks/db';
 
 export const ADMIN = 'admin@example.com';
@@ -17,6 +18,7 @@ export function setupMockApi(loginAs?: string) {
   const db: MockDb = createSeedDb();
   if (loginAs) db.sessionUserId = db.users.find((u) => u.email === loginAs)!.id;
   setFetch(createMockFetch(() => db));
+  setUploadTransport(createMockUploadTransport(() => db));
   return db;
 }
 

@@ -5,6 +5,8 @@ import { createPortal } from 'react-dom';
 import { enter, exit } from '@/motion/tokens';
 import { XIcon } from './icons';
 
+const WIDTH = { md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl', '5xl': 'max-w-5xl' } as const;
+
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /** Accessible modal dialog: portal, backdrop, Escape to close, focus trap, focus restore. */
@@ -16,6 +18,7 @@ export function Modal({
   className,
   hideTitle,
   position = 'center',
+  width = 'md',
 }: {
   open: boolean;
   onClose: () => void;
@@ -24,9 +27,16 @@ export function Modal({
   className?: string;
   hideTitle?: boolean;
   position?: 'center' | 'top';
+  /** A prop, not a class: Tailwind emits `max-w-md` after `max-w-lg`/`-5xl`, so classes can't override it. */
+  width?: keyof typeof WIDTH;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // The effect below must run only when the modal opens and closes: callers often pass an inline
+  // onClose, and re-running it on every render would move focus back to the dialog (and, on
+  // cleanup, to whatever had it before), yanking keyboard focus off the control in use.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -40,7 +50,7 @@ export function Modal({
       if (e.key === 'Escape') {
         e.stopPropagation();
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
       } else if (e.key === 'Tab' && el) {
         const items = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)];
         if (items.length === 0) return;
@@ -60,7 +70,7 @@ export function Modal({
       document.removeEventListener('keydown', onKey, true);
       previouslyFocused?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return createPortal(
     <AnimatePresence>
@@ -79,7 +89,7 @@ export function Modal({
             aria-modal="true"
             aria-labelledby={titleId}
             tabIndex={-1}
-            className={clsx('w-full max-w-md rounded-xl bg-white shadow-2xl outline-none', className)}
+            className={clsx('w-full rounded-xl bg-white shadow-2xl outline-none', WIDTH[width], className)}
             initial={{ opacity: 0, scale: 0.97, y: position === 'top' ? -6 : 4 }}
             animate={{ opacity: 1, scale: 1, y: 0, transition: enter }}
             exit={{ opacity: 0, scale: 0.98, transition: exit }}

@@ -18,7 +18,9 @@ export type ActivityType =
   | 'MOVED_SECTION'
   | 'RENAMED'
   | 'PRIORITY_CHANGED'
-  | 'DESCRIPTION_CHANGED';
+  | 'DESCRIPTION_CHANGED'
+  | 'ATTACHMENT_ADDED'
+  | 'ATTACHMENT_REMOVED';
 
 export type UserSummary = { id: string; name: string; email: string; avatarColor: string };
 /** `GET /users` items: a summary plus the person's role in the current workspace (SPEC §12 W8). */
@@ -110,6 +112,8 @@ export type Task = {
   subtaskCount: number;
   completedSubtaskCount: number;
   commentCount: number;
+  /** non-draft attachments, task-level and in comments (SPEC §13) */
+  attachmentCount: number;
   project: TaskProjectRef | null;
   createdAt: string;
   updatedAt: string;
@@ -118,6 +122,46 @@ export type TaskDetail = Task & {
   followers: UserSummary[];
   subtasks: Task[];
   parent: { id: string; title: string } | null;
+  /** non-draft, task-level and comment ones, newest first (SPEC §13) */
+  attachments: Attachment[];
+};
+
+// ---- Attachments & links (SPEC §13, v1.3) ----
+
+/** Open enum: unknown kinds are shown generically. */
+export type AttachmentKind = 'FILE' | 'LINK' | (string & {});
+export type LinkPreviewStatus = 'PENDING' | 'READY' | 'FAILED';
+
+export type Attachment = {
+  id: string;
+  workspaceId: string;
+  taskId: string;
+  commentId: string | null;
+  kind: AttachmentKind;
+  draft: boolean;
+  uploader: UserSummary;
+  createdAt: string;
+  // FILE (null for LINK)
+  name: string | null;
+  /** server-sniffed */
+  mimeType: string | null;
+  size: number | null;
+  width: number | null;
+  height: number | null;
+  hasThumbnail: boolean;
+  // LINK (null for FILE)
+  url: string | null;
+  title: string | null;
+  description: string | null;
+  siteName: string | null;
+  /** open string: unknown providers get the generic icon */
+  provider: string | null;
+  previewStatus: LinkPreviewStatus | null;
+  hasIcon: boolean;
+  hasImage: boolean;
+  /** Relative paths from the server; never built by hand. */
+  contentPath: string | null;
+  thumbnailPath: string | null;
 };
 
 export type CommentStory = {
@@ -173,6 +217,8 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'GONE'
   | 'RATE_LIMITED'
+  | 'PAYLOAD_TOO_LARGE'
+  | 'INSUFFICIENT_STORAGE'
   | 'INTERNAL';
 export type ErrorBody = { error: { code: ErrorCode; message: string; details?: unknown } };
 

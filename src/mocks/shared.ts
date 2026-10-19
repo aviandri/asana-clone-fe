@@ -1,5 +1,6 @@
 // Helpers shared by the mock route modules (core routes in backend.ts, goals.ts, reports.ts).
 import type {
+  Attachment,
   ErrorCode,
   Me,
   Project,
@@ -13,7 +14,7 @@ import type {
   Workspace,
   WorkspaceRole,
 } from '@/api/types';
-import { type MockDb, type ProjectRow, type TaskRow, type UserRow, type WorkspaceMemberRow, type WorkspaceRow } from './db';
+import { type AttachmentRow, type MockDb, type ProjectRow, type TaskRow, type UserRow, type WorkspaceMemberRow, type WorkspaceRow } from './db';
 
 export class HttpError extends Error {
   constructor(
@@ -225,6 +226,7 @@ export function serializeTask(db: MockDb, t: TaskRow): Task {
     subtaskCount: subs.length,
     completedSubtaskCount: subs.filter((s) => s.completed).length,
     commentCount: db.comments.filter((c) => c.taskId === t.id).length,
+    attachmentCount: (db.attachments ?? []).filter((a) => a.taskId === t.id && !a.draft).length,
     project: project ? { id: project.id, name: project.name, color: project.color } : null,
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
@@ -242,6 +244,42 @@ export function serializeTaskDetail(db: MockDb, t: TaskRow): TaskDetail {
       .sort((a, b) => a.position - b.position)
       .map((s) => serializeTask(db, s)),
     parent: parent ? { id: parent.id, title: parent.title } : null,
+    attachments: (db.attachments ?? [])
+      .filter((a) => a.taskId === t.id && !a.draft)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))
+      .map((a) => serializeAttachment(db, a)),
+  };
+}
+
+export function serializeAttachment(db: MockDb, a: AttachmentRow): Attachment {
+  const file = a.kind === 'FILE';
+  // The real server derives these paths; the mock hands out the browser-loadable URL instead.
+  const contentPath = file ? (a.contentUrl ?? `/api/v1/attachments/${a.id}/content`) : null;
+  return {
+    id: a.id,
+    workspaceId: a.workspaceId,
+    taskId: a.taskId,
+    commentId: a.commentId,
+    kind: a.kind,
+    draft: a.draft,
+    uploader: summary(userById(db, a.uploaderId)),
+    createdAt: a.createdAt,
+    name: file ? a.name : null,
+    mimeType: file ? a.mimeType : null,
+    size: file ? a.size : null,
+    width: a.width,
+    height: a.height,
+    hasThumbnail: false,
+    url: file ? null : a.url,
+    title: file ? null : a.title,
+    description: file ? null : a.description,
+    siteName: file ? null : a.siteName,
+    provider: file ? null : a.provider,
+    previewStatus: file ? null : a.previewStatus,
+    hasIcon: false,
+    hasImage: false,
+    contentPath,
+    thumbnailPath: null,
   };
 }
 

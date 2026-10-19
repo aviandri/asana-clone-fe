@@ -6,6 +6,8 @@ import type {
   Notification,
   Story,
 } from '@/api/types';
+import type { UploadTransport } from '@/api/upload';
+import { attachmentRoutes } from './attachments';
 import { goalRoutes } from './goals';
 import { reportRoutes } from './reports';
 import { workspaceRoutes } from './workspaces';
@@ -189,6 +191,7 @@ function deleteTaskTree(db: MockDb, id: string) {
   db.followers = db.followers.filter((f) => !ids.has(f.taskId));
   db.comments = db.comments.filter((c) => !ids.has(c.taskId));
   db.activities = db.activities.filter((a) => !ids.has(a.taskId));
+  if (db.attachments) db.attachments = db.attachments.filter((a) => !ids.has(a.taskId));
   db.notifications = db.notifications.filter((n) => !n.taskId || !ids.has(n.taskId));
 }
 
@@ -983,7 +986,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   ],
 ];
 
-const compiled = [...routes, ...workspaceRoutes, ...goalRoutes, ...reportRoutes].map(([method, pattern, handler, opts]) => {
+const compiled = [...routes, ...workspaceRoutes, ...goalRoutes, ...reportRoutes, ...attachmentRoutes].map(([method, pattern, handler, opts]) => {
   const keys: string[] = [];
   const re = new RegExp(
     '^' +
@@ -1070,5 +1073,30 @@ export function createMockFetch(
       status: res.status,
       headers: { 'Content-Type': 'application/json' },
     });
+  };
+}
+
+/**
+ * An upload transport that serves `POST …/attachments` from the mock DB, reporting progress in a few
+ * steps (spread over `latencyMs`) and honouring cancel.
+ */
+export function createMockUploadTransport(
+  getDb: () => MockDb,
+  opts: { latencyMs?: number; onChange?: (db: MockDb) => void } = {},
+): UploadTransport {
+  return async (input, file, { headers, onProgress, signal }) => {
+    const aborted = () => new DOMException('Upload cancelled', 'AbortError');
+    for (const step of [0.25, 0.5, 0.75, 1]) {
+      if (signal?.aborted) throw aborted();
+      if (opts.latencyMs) await new Promise((r) => setTimeout(r, opts.latencyMs! / 4));
+      if (signal?.aborted) throw aborted();
+      onProgress?.(step);
+    }
+    const url = new URL(input, 'http://mock.local');
+    const path = url.pathname.replace(/^\/api\/v1/, '');
+    const db = getDb();
+    const res = handleMockRequest(db, 'POST', path, url.searchParams, { file }, { workspaceId: headers['X-Workspace-Id'] ?? null });
+    opts.onChange?.(db);
+    return { status: res.status, text: res.body === undefined ? '' : JSON.stringify(res.body) };
   };
 }

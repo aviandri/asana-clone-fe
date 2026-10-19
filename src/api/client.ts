@@ -95,18 +95,37 @@ export async function request<T>(method: string, path: string, opts: RequestOpts
     }
   }
   if (!res.ok) {
-    const err = (json as ErrorBody | undefined)?.error;
-    if (res.status === 401 && !path.startsWith('/auth/')) onUnauthorized?.();
     // Only for the tab's own workspace: an explicit per-call workspace (rail unread probes) doesn't count.
     if (res.status === 404 && opts.workspaceId === undefined && headers[WORKSPACE_HEADER] && isScoped(path)) onWorkspaceLost?.();
-    throw new ApiError(
-      res.status,
-      err?.code ?? (res.status === 401 ? 'UNAUTHORIZED' : 'INTERNAL'),
-      err?.message ?? res.statusText ?? 'Request failed',
-      err?.details,
-    );
+    throw failure(path, res.status, json, res.statusText);
   }
   return json as T;
+}
+
+/** The ApiError for a failed response (and the session-expired handler on a 401). */
+export function failure(path: string, status: number, json: unknown, statusText?: string): ApiError {
+  const err = (json as ErrorBody | undefined)?.error;
+  if (status === 401 && !path.startsWith('/auth/')) onUnauthorized?.();
+  return new ApiError(
+    status,
+    err?.code ?? (status === 401 ? 'UNAUTHORIZED' : 'INTERNAL'),
+    err?.message ?? statusText ?? 'Request failed',
+    err?.details,
+  );
+}
+
+/** `path` plus one query parameter, whether or not it already has a query string. */
+export function withQuery(path: string, key: string, value: string) {
+  return `${path}${path.includes('?') ? '&' : '?'}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+}
+
+/** The current tab's headers, for transports other than `request` (uploads). */
+export function requestHeaders(): Record<string, string> {
+  return baseHeaders();
+}
+
+export function apiUrl(path: string) {
+  return `${API_BASE}${path}`;
 }
 
 export const http = {

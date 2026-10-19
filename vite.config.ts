@@ -8,6 +8,16 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // pdf.js's worker ships as .mjs, which nginx's stock mime.types doesn't know (it would go out
+        // as application/octet-stream, and browsers refuse module workers that aren't JavaScript).
+        assetFileNames: (asset) =>
+          asset.names?.some((n) => n.endsWith('.mjs')) ? 'assets/[name]-[hash].js' : 'assets/[name]-[hash][extname]',
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

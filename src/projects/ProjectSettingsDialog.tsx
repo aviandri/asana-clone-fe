@@ -240,7 +240,7 @@ export function ProjectSettingsDialog({
   const canManage = canManageProject(project, me);
   const [tab, setTab] = useState(initialTab);
   return (
-    <Modal open={open} onClose={onClose} title="Project settings" className="max-w-lg">
+    <Modal open={open} onClose={onClose} title="Project settings" width="lg">
       <div className="px-5 pb-5">
         <div role="tablist" aria-label="Settings sections" className="mb-4 flex gap-4 border-b border-gray-200">
           {(['general', 'members'] as const).map((t) => (

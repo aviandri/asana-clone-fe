@@ -36,24 +36,30 @@ export function useAttachmentActions(task: Pick<TaskDetail, 'id' | 'projectId'>)
     void qc.invalidateQueries({ queryKey: qk.myTasks });
   }, [qc, taskId, projectId]);
 
+  // Show a new attachment right away, then refetch the truth. (`??`: a server from before §13 sends
+  // neither field.)
+  const insert = useCallback(
+    (a: Attachment) =>
+      qc.setQueryData<TaskDetail>(qk.task(taskId), (t) =>
+        t && !(t.attachments ?? []).some((x) => x.id === a.id)
+          ? { ...t, attachments: [a, ...(t.attachments ?? [])], attachmentCount: (t.attachmentCount ?? 0) + 1 }
+          : t,
+      ),
+    [qc, taskId],
+  );
+
   const attach = useCallback(
     (files: Iterable<File>) => {
       for (const file of files) {
         startUpload(taskId, file, {
           onUploaded: (a) => {
-            // Show it right away (the upload row just left the list), then refetch the truth.
-            // (`?? `: a server from before §13 sends neither field.)
-            qc.setQueryData<TaskDetail>(qk.task(taskId), (t) =>
-              t && !(t.attachments ?? []).some((x) => x.id === a.id)
-                ? { ...t, attachments: [a, ...(t.attachments ?? [])], attachmentCount: (t.attachmentCount ?? 0) + 1 }
-                : t,
-            );
+            insert(a);
             refresh();
           },
         });
       }
     },
-    [qc, taskId, refresh],
+    [taskId, insert, refresh],
   );
 
   const remove = useMutation({
@@ -72,5 +78,23 @@ export function useAttachmentActions(task: Pick<TaskDetail, 'id' | 'projectId'>)
     onSettled: refresh,
   });
 
-  return { attach, remove };
+  // Errors show in the link form, not as a toast.
+  const addLink = useMutation({
+    mutationFn: (input: { url: string; title?: string }) => attachmentsApi.addLink(taskId, input),
+    meta: { quiet: true },
+    onSuccess: (a) => {
+      insert(a);
+      refresh();
+    },
+  });
+
+  const refreshPreview = useMutation({
+    mutationFn: (a: Attachment) => attachmentsApi.refreshPreview(a.id),
+    onSuccess: (a) =>
+      qc.setQueryData<TaskDetail>(qk.task(taskId), (t) =>
+        t ? { ...t, attachments: (t.attachments ?? []).map((x) => (x.id === a.id ? a : x)) } : t,
+      ),
+  });
+
+  return { attach, remove, addLink, refreshPreview };
 }

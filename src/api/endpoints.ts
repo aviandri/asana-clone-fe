@@ -138,7 +138,9 @@ export const tasksApi = {
   removeFollower: (id: string, userId: string) =>
     http.delete<TaskDetail>(`/tasks/${id}/followers/${userId}`),
   stories: (id: string) => http.get<ListResponse<Story>>(`/tasks/${id}/stories`),
-  addComment: (id: string, body: string) => http.post<Story>(`/tasks/${id}/comments`, { body }),
+  /** `attachmentIds`: the caller's drafts on this task (≤ 20), which become the comment's (SPEC §13). */
+  addComment: (id: string, body: string, attachmentIds: string[] = []) =>
+    http.post<Story>(`/tasks/${id}/comments`, attachmentIds.length ? { body, attachmentIds } : { body }),
 };
 
 export const commentsApi = {
@@ -188,6 +190,10 @@ export const attachmentsApi = {
   /** Task-level, or a comment draft with `draft: true` (SPEC §13). */
   upload: (taskId: string, file: File, opts: UploadOpts = {}) =>
     uploadFile<Attachment>(`/tasks/${taskId}/attachments`, file, opts),
+  /** The preview is fetched by the server (≤ 6 s); a failed fetch still creates the link. */
+  addLink: (taskId: string, body: { url: string; title?: string; draft?: boolean }) =>
+    http.post<Attachment>(`/tasks/${taskId}/attachments/link`, body),
+  refreshPreview: (id: string) => http.post<Attachment>(`/attachments/${id}/refresh-preview`),
   get: (id: string) => http.get<Attachment>(`/attachments/${id}`),
   delete: (id: string) => http.delete(`/attachments/${id}`),
 };
@@ -198,4 +204,10 @@ export const attachmentUrls = {
   download: (a: Pick<Attachment, 'contentPath'>) => (a.contentPath ? withQuery(a.contentPath, 'download', '1') : null),
   thumbnail: (a: Pick<Attachment, 'thumbnailPath'>, size: 'small' | 'large') =>
     a.thumbnailPath ? withQuery(a.thumbnailPath, 'size', size) : null,
+  // Server-cached (clients never contact third-party hosts). §13 A11: the server's paths; the
+  // hand-built route is only for servers from before A11, and goes once BE sends the fields.
+  linkIcon: (a: Pick<Attachment, 'id' | 'hasIcon' | 'iconPath'>) =>
+    a.iconPath ?? (a.hasIcon ? `${API_BASE}/attachments/${a.id}/icon` : null),
+  linkImage: (a: Pick<Attachment, 'id' | 'hasImage' | 'imagePath'>) =>
+    a.imagePath ?? (a.hasImage ? `${API_BASE}/attachments/${a.id}/image` : null),
 };

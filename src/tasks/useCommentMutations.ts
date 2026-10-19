@@ -18,7 +18,8 @@ export function useCommentMutations(task: Pick<Task, 'id' | 'projectId'>) {
     qc.setQueryData<Story[]>(qk.stories(task.id), (list) => list?.map((x) => (x.id === s.id ? s : x)));
 
   const add = useMutation({
-    mutationFn: (body: string) => tasksApi.addComment(task.id, body),
+    mutationFn: ({ body, attachmentIds = [] }: { body: string; attachmentIds?: string[] }) =>
+      tasksApi.addComment(task.id, body, attachmentIds),
     onSuccess: appendStory,
     onSettled: refresh,
   });

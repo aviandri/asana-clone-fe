@@ -120,6 +120,17 @@ export function cancelUpload(id: string) {
   emit();
 }
 
+/** Stops and forgets every upload of one kind on a task (the composer going away). */
+export function cancelUploads(taskId: string, draft: boolean) {
+  for (const [id, e] of entries) {
+    if (e.item.taskId === taskId && e.item.draft === draft) {
+      entries.delete(id);
+      e.controller?.abort();
+    }
+  }
+  emit();
+}
+
 export function retryUpload(id: string) {
   const e = entries.get(id);
   if (e && e.item.status === 'failed' && e.item.retryable) run(id);

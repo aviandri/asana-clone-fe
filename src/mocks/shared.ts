@@ -280,6 +280,8 @@ export function serializeAttachment(db: MockDb, a: AttachmentRow): Attachment {
     hasImage: false,
     contentPath,
     thumbnailPath: null,
+    iconPath: null,
+    imagePath: null,
   };
 }
 

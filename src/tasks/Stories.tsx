@@ -11,6 +11,13 @@ import { Spinner } from '@/components/Spinner';
 import { formatDue, timeAgo } from '@/lib/dates';
 import { activeMentionQuery, mentionMarkup, tokenizeBody } from '@/lib/mentions';
 import { PRIORITY_LABEL } from '@/lib/priority';
+import { CommentAttachments } from '@/attachments/CommentAttachments';
+import { ComposerAttachments } from '@/attachments/ComposerAttachments';
+import { LinkForm } from '@/attachments/LinkForm';
+import { useComposerDrafts } from '@/attachments/useComposerDrafts';
+import { pastedClipboardFiles, useFileDrop } from '@/attachments/useFileDrop';
+import { LinkIcon, PaperclipIcon } from '@/components/icons';
+import { showToast } from '@/lib/toast';
 import { useCommentMutations } from './useCommentMutations';
 
 /**
@@ -133,7 +140,8 @@ function CommentItem({ story, task }: { story: CommentStory; task: TaskDetail })
               <button
                 type="button"
                 className="btn-primary py-1 text-xs"
-                disabled={!draft.trim()}
+                // A9: the body may be emptied when the comment has attachments.
+                disabled={!draft.trim() && !story.attachments?.length}
                 onClick={() => edit.mutate({ id: story.id, body: draft.trim() }, { onSuccess: () => setEditing(false) })}
               >
                 Save
@@ -144,8 +152,9 @@ function CommentItem({ story, task }: { story: CommentStory; task: TaskDetail })
             </div>
           </div>
         ) : (
-          <CommentBody body={story.body} />
+          story.body && <CommentBody body={story.body} />
         )}
+        <CommentAttachments attachments={story.attachments} />
       </div>
     </li>
   );
@@ -158,7 +167,21 @@ function CommentItem({ story, task }: { story: CommentStory; task: TaskDetail })
 export function CommentComposer({ task }: { task: TaskDetail }) {
   const me = useCurrentUser();
   const users = useUsers();
-  const { add } = useCommentMutations(task);
+  // Attachments live here as server drafts until the comment is posted (SPEC §13).
+  const drafts = useComposerDrafts(task);
+  // The drafts' side of a post settles even if the panel closed meanwhile.
+  const { add } = useCommentMutations(task, {
+    onAdded: (v) => drafts.posted(v.attachmentIds ?? []),
+    // The chips stay (and stay removable) so the comment can be sent again.
+    onAddFailed: (v) => drafts.postFailed(v.attachmentIds ?? []),
+  });
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [addingLink, setAddingLink] = useState(false);
+  const attachFiles = (files: File[]) => {
+    const left = drafts.attachFiles(files);
+    if (left > 0) showToast(`A comment can have up to 20 attachments; ${left} file${left === 1 ? ' was' : 's were'} left out.`);
+  };
+  const drop = useFileDrop(true, attachFiles, { isolate: true });
   const ref = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState('');
   const [picked, setPicked] = useState<UserSummary[]>([]);
@@ -208,15 +231,25 @@ export function CommentComposer({ task }: { task: TaskDetail }) {
     return out;
   };
 
+  const attachmentIds = drafts.drafts.map((a) => a.id);
+  // Send waits for uploads to finish (they'd be left out otherwise).
+  const canSend = (!!text.trim() || attachmentIds.length > 0) && !drafts.uploading && !add.isPending;
+
   const submit = () => {
+    if (!canSend) return;
     const body = toApiBody(text);
-    if (!body) return;
-    add.mutate(body, {
-      onSuccess: () => {
-        setText('');
-        setPicked([]);
+    // Exactly these ids go out; anything attached while the post is in flight stays for the next one.
+    const sent = attachmentIds;
+    drafts.beginPost(sent);
+    add.mutate(
+      { body, attachmentIds: sent },
+      {
+        onSuccess: () => {
+          setText('');
+          setPicked([]);
+        },
       },
-    });
+    );
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -249,9 +282,31 @@ export function CommentComposer({ task }: { task: TaskDetail }) {
     }
   };
 
-  const expanded = focused || !!text;
+  const hasAttachments = drafts.drafts.length > 0 || drafts.uploads.length > 0;
+  const expanded = focused || !!text || hasAttachments || addingLink;
   return (
-    <div className="flex gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3">
+    <div
+      className="relative flex gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3"
+      {...drop.bind}
+      onPaste={(e) => {
+        // A pasted file (a screenshot) attaches even in the text box, but a paste that also carries
+        // text (Excel and Word put both on the clipboard) stays text there.
+        const el = e.target as HTMLElement;
+        const inField = el.tagName === 'TEXTAREA' || el.tagName === 'INPUT';
+        if (inField && Array.from(e.clipboardData?.types ?? []).includes('text/plain')) return;
+        const files = pastedClipboardFiles(e);
+        if (files.length) {
+          e.preventDefault();
+          e.stopPropagation();
+          attachFiles(files);
+        }
+      }}
+    >
+      {drop.active && (
+        <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-primary-500 bg-primary-50/90 text-sm font-medium text-primary-700">
+          Drop to attach to your comment
+        </div>
+      )}
       <Avatar user={me} size="md" />
       <div className="relative min-w-0 flex-1">
         {mention && suggestions.length > 0 && (
@@ -294,16 +349,56 @@ export function CommentComposer({ task }: { task: TaskDetail }) {
             }
           }}
         />
+        {/* Always mounted: the OS file picker blurs the page, which collapses the composer. */}
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          aria-label="Choose files for the comment"
+          onChange={(e) => {
+            const picked = [...(e.target.files ?? [])];
+            e.target.value = '';
+            if (picked.length) attachFiles(picked);
+          }}
+        />
+        <ComposerAttachments drafts={drafts.drafts} uploads={drafts.uploads} sending={drafts.sending} onRemove={drafts.remove} />
+        {addingLink && (
+          <div className="mt-2">
+            <LinkForm
+              label="Add link to comment"
+              onCancel={() => setAddingLink(false)}
+              onSubmit={(input) => drafts.addLink(input).then(() => setAddingLink(false))}
+            />
+          </div>
+        )}
         {expanded && (
           <div className="mt-2 flex items-center justify-end gap-2">
-            {add.isError && <span role="alert" className="mr-auto text-xs text-red-600">Couldn’t post comment.</span>}
             <button
               type="button"
-              className="btn-primary py-1"
-              disabled={!text.trim() || add.isPending}
+              aria-label="Attach files to comment"
+              className="btn-ghost p-1.5"
+              disabled={drafts.full}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={submit}
+              onClick={() => fileInput.current?.click()}
             >
+              <PaperclipIcon />
+            </button>
+            <button
+              type="button"
+              aria-label="Add link to comment"
+              aria-expanded={addingLink}
+              className="btn-ghost p-1.5"
+              disabled={drafts.full}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setAddingLink((v) => !v)}
+            >
+              <LinkIcon />
+            </button>
+            <span className="mr-auto" />
+            {add.isError && <span role="alert" className="text-xs text-red-600">Couldn’t post comment.</span>}
+            {drafts.uploading && <span className="text-xs text-gray-500">Waiting for uploads…</span>}
+            <button type="button" className="btn-primary py-1" disabled={!canSend} onMouseDown={(e) => e.preventDefault()} onClick={submit}>
               Comment
             </button>
           </div>

@@ -14,7 +14,10 @@ const fromInside = (e: { currentTarget: EventTarget; target: EventTarget }) =>
  * files hover over it, `active` is true so the target can highlight; a disabled target ignores them,
  * and [useNoFileNavigation] keeps the browser from opening a file dropped there.
  */
-export function useFileDrop(enabled: boolean, onFiles: (files: File[]) => void) {
+export function useFileDrop(enabled: boolean, onFiles: (files: File[]) => void, opts: { isolate?: boolean } = {}) {
+  // An inner target (the composer inside the task panel) keeps its drag events from the outer one,
+  // so only one of them highlights, and a drop lands in exactly one.
+  const { isolate = false } = opts;
   const [active, setActive] = useState(false);
   // dragenter/leave fire for every child crossed: count them so the highlight doesn't flicker.
   const depth = useRef(0);
@@ -30,26 +33,29 @@ export function useFileDrop(enabled: boolean, onFiles: (files: File[]) => void) 
     (e: DragEvent) => {
       if (!enabled || !carriesFiles(e) || !fromInside(e)) return;
       e.preventDefault();
+      if (isolate) e.stopPropagation();
       depth.current += 1;
       setActive(true);
     },
-    [enabled],
+    [enabled, isolate],
   );
   const onDragOver = useCallback(
     (e: DragEvent) => {
       if (!enabled || !carriesFiles(e) || !fromInside(e)) return;
       e.preventDefault();
+      if (isolate) e.stopPropagation();
       e.dataTransfer.dropEffect = 'copy';
     },
-    [enabled],
+    [enabled, isolate],
   );
   const onDragLeave = useCallback(
     (e: DragEvent) => {
       if (!enabled || !carriesFiles(e) || !fromInside(e)) return;
+      if (isolate) e.stopPropagation();
       depth.current = Math.max(0, depth.current - 1);
       if (depth.current === 0) setActive(false);
     },
-    [enabled],
+    [enabled, isolate],
   );
   const onDrop = useCallback(
     (e: DragEvent) => {
@@ -75,6 +81,12 @@ export function pastedFiles(e: ClipboardEvent): File[] {
   const el = e.target as HTMLElement | null;
   const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
   if (typing) return [];
+  return [...(e.clipboardData?.files ?? [])];
+}
+
+/** Every file on the clipboard, wherever the paste happened (the composer takes them in its text box). */
+export function pastedClipboardFiles(e: ClipboardEvent): File[] {
+  if (!fromInside(e)) return [];
   return [...(e.clipboardData?.files ?? [])];
 }
 

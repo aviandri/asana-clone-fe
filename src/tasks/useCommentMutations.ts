@@ -3,8 +3,18 @@ import { commentsApi, tasksApi } from '@/api/endpoints';
 import { qk } from '@/api/queryKeys';
 import type { Story, Task } from '@/api/types';
 
-/** Comments change the task's commentCount and followers, so refresh those views too. */
-export function useCommentMutations(task: Pick<Task, 'id' | 'projectId'>) {
+type AddVars = { body: string; attachmentIds?: string[] };
+
+/**
+ * Comments change the task's commentCount and followers, so refresh those views too.
+ *
+ * [onAdded]/[onAddFailed] run even if the caller unmounted mid-post (unlike mutate()'s own
+ * callbacks), for state that outlives the component, like the composer's draft attachments.
+ */
+export function useCommentMutations(
+  task: Pick<Task, 'id' | 'projectId'>,
+  hooks: { onAdded?: (vars: AddVars) => void; onAddFailed?: (vars: AddVars) => void } = {},
+) {
   const qc = useQueryClient();
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: qk.stories(task.id) });
@@ -18,8 +28,12 @@ export function useCommentMutations(task: Pick<Task, 'id' | 'projectId'>) {
     qc.setQueryData<Story[]>(qk.stories(task.id), (list) => list?.map((x) => (x.id === s.id ? s : x)));
 
   const add = useMutation({
-    mutationFn: (body: string) => tasksApi.addComment(task.id, body),
-    onSuccess: appendStory,
+    mutationFn: ({ body, attachmentIds = [] }: AddVars) => tasksApi.addComment(task.id, body, attachmentIds),
+    onSuccess: (s, vars) => {
+      appendStory(s);
+      hooks.onAdded?.(vars);
+    },
+    onError: (_err, vars) => hooks.onAddFailed?.(vars),
     onSettled: refresh,
   });
   const edit = useMutation({

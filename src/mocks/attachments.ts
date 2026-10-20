@@ -67,7 +67,102 @@ function touch(t: TaskRow) {
   t.updatedAt = nowIso();
 }
 
+const PROVIDERS: [RegExp, string][] = [
+  [/(^|\.)drive\.google\.com$/, 'google_drive'],
+  [/(^|\.)docs\.google\.com$/, 'google_docs'],
+  [/(^|\.)dropbox\.com$/, 'dropbox'],
+  [/(^|\.)(onedrive\.live\.com|sharepoint\.com)$/, 'onedrive'],
+  [/(^|\.)box\.com$/, 'box'],
+  [/(^|\.)figma\.com$/, 'figma'],
+  [/(^|\.)(youtube\.com|youtu\.be)$/, 'youtube'],
+  [/(^|\.)loom\.com$/, 'loom'],
+  [/(^|\.)github\.com$/, 'github'],
+  [/(^|\.)gitlab\.com$/, 'gitlab'],
+  [/(^|\.)notion\.(so|site)$/, 'notion'],
+  [/(^|\.)miro\.com$/, 'miro'],
+  [/(^|\.)slack\.com$/, 'slack'],
+  [/(^|\.)zoom\.us$/, 'zoom'],
+];
+
+const urlError = (message: string) => new HttpError(400, 'VALIDATION', message, [{ path: ['url'], message }]);
+
+/** §13: absolute http(s), ≤ 2048 chars, no credentials. */
+function parseLinkUrl(raw: unknown): URL {
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  if (!text || text.length > 2048) throw urlError('Enter a link of up to 2048 characters.');
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    throw urlError('Enter a full http:// or https:// link.');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw urlError('Only http:// and https:// links can be added.');
+  if (url.username || url.password) throw urlError('Links can’t contain a username or password.');
+  return url;
+}
+
+/** Stands in for the server's preview fetch: no network, a provider from the host, `fail` hosts fail. */
+function fakePreview(url: URL, title: string | null) {
+  const host = url.hostname.replace(/^www\./, '');
+  const provider = PROVIDERS.find(([re]) => re.test(url.hostname))?.[1] ?? null;
+  const failed = /(^|\.)fail\./.test(url.hostname);
+  return {
+    title: title || (failed ? null : host),
+    description: null,
+    siteName: failed ? null : host,
+    provider,
+    previewStatus: (failed ? 'FAILED' : 'READY') as AttachmentRow['previewStatus'],
+  };
+}
+
 export const attachmentRoutes: [string, string, Handler][] = [
+  [
+    'POST',
+    '/tasks/:id/attachments/link',
+    ({ db, me, params, body }) => {
+      const t = visibleTask(db, params.id, me!);
+      const draft = body?.draft === true;
+      if (!draft) assertCanEditTask(db, t, me!);
+      const url = parseLinkUrl(body?.url);
+      const title = typeof body?.title === 'string' && body.title.trim() ? body.title.trim().slice(0, 300) : null;
+      const row: AttachmentRow = {
+        id: uid(db, 'atch'),
+        workspaceId: t.workspaceId,
+        taskId: t.id,
+        commentId: null,
+        uploaderId: me!.id,
+        kind: 'LINK',
+        draft,
+        createdAt: nowIso(),
+        name: null,
+        mimeType: null,
+        size: null,
+        width: null,
+        height: null,
+        contentUrl: null,
+        url: url.toString(),
+        ...fakePreview(url, title),
+      };
+      table(db).push(row);
+      if (!draft) {
+        activity(db, t.id, me!.id, 'ATTACHMENT_ADDED', { attachmentId: row.id, kind: row.kind, name: row.title ?? row.url });
+        touch(t);
+      }
+      return { status: 201, body: serializeAttachment(db, row) };
+    },
+  ],
+  [
+    'POST',
+    '/attachments/:id/refresh-preview',
+    ({ db, me, params }) => {
+      const { a } = visibleAttachment(db, params.id, me!);
+      if (a.kind !== 'LINK' || !a.url) throw new HttpError(400, 'VALIDATION', 'Only links have previews');
+      // A user-entered title wins over the fetched one.
+      const fetched = fakePreview(new URL(a.url), null);
+      Object.assign(a, { ...fetched, title: a.title ?? fetched.title });
+      return serializeAttachment(db, a);
+    },
+  ],
   [
     'POST',
     '/tasks/:id/attachments',

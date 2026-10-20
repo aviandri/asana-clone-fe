@@ -41,6 +41,7 @@ import {
   serializeProjectDetail,
   serializeTask,
   serializeTaskDetail,
+  serializeAttachment,
   canSeeProject,
   visibleProject,
   assertCanEditProjectContent,
@@ -211,6 +212,10 @@ function serializeStory(db: MockDb, s: { kind: 'comment' | 'activity'; row: unkn
       body: c.body,
       createdAt: c.createdAt,
       editedAt: c.editedAt,
+      attachments: (db.attachments ?? [])
+        .filter((a) => a.commentId === c.id && !a.draft)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))
+        .map((a) => serializeAttachment(db, a)),
     };
   }
   const a = s.row as MockDb['activities'][number];
@@ -872,10 +877,17 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
     ({ db, me, params, body }) => {
       const t = visibleTask(db, params.id, me!);
       const text = String(body?.body ?? '').trim();
-      if (!text) throw invalid('body is required');
+      // §13: drafts the caller uploaded to this task (≤ 20) become the comment's; then body may be empty.
+      const ids: unknown = body?.attachmentIds ?? [];
+      const badIds = () => new HttpError(400, 'VALIDATION', 'Invalid attachmentIds', [{ path: ['attachmentIds'], message: 'Invalid' }]);
+      if (!Array.isArray(ids) || ids.length > 20) throw badIds();
+      const drafts = ids.map((id) => (db.attachments ?? []).find((a) => a.id === id));
+      if (drafts.some((a) => !a || !a.draft || a.uploaderId !== me!.id || a.taskId !== t.id)) throw badIds();
+      if (!text && drafts.length === 0) throw invalid('body is required');
       mentionedIds(text).forEach((id) => assertWorkspaceMember(db, t.workspaceId, id, 'body'));
       const c = { id: uid(db, 'cmnt'), taskId: t.id, authorId: me!.id, body: text, createdAt: nowIso(), editedAt: null };
       db.comments.push(c);
+      for (const a of drafts) Object.assign(a!, { draft: false, commentId: c.id });
       follow(db, t.id, me!.id);
       const mentioned = new Set(mentionedIds(text).filter((id) => db.users.some((u) => u.id === id)));
       mentioned.forEach((id) => notify(db, id, me!.id, t.id, 'MENTIONED'));
@@ -906,6 +918,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       const t = db.tasks.find((x) => x.id === c.taskId);
       if (c.authorId !== me!.id && !(t && roleIn(db, t.workspaceId, me!.id) === 'ADMIN')) throw forbidden();
       db.comments = db.comments.filter((x) => x.id !== c.id);
+      if (db.attachments) db.attachments = db.attachments.filter((a) => a.commentId !== c.id);
       return { status: 204 };
     },
   ],

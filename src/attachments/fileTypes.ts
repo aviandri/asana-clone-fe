@@ -104,3 +104,29 @@ export function attachmentLabel(a: Pick<Attachment, 'kind' | 'name' | 'size' | '
   const size = formatBytes(a.size);
   return ['Attachment', a.name || 'file', size].filter(Boolean).join(', ');
 }
+
+/** The host a link card shows when there's no site name: "figma.com". */
+export function hostOf(url: string | null) {
+  if (!url) return '';
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+/** Client-side §13 checks (the server re-checks): absolute http(s), ≤ 2048 chars, no credentials. */
+export function linkUrlProblem(raw: string): string | null {
+  const text = raw.trim();
+  if (!text) return 'Enter a link.';
+  if (text.length > 2048) return 'Links can be up to 2048 characters.';
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return 'Enter a full link, starting with http:// or https://.';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'Only http:// and https:// links can be added.';
+  if (url.username || url.password) return 'Links can’t contain a username or password.';
+  return null;
+}

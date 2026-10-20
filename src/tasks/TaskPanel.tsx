@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { ApiError } from '@/api/client';
 import { useProject, useTask } from '@/api/hooks';
 import { AttachmentsSection } from '@/attachments/AttachmentsSection';
+import { AttachmentViewerProvider } from '@/attachments/AttachmentViewerProvider';
 import { useAttachmentActions } from '@/attachments/useAttachments';
 import { pastedFiles, useFileDrop } from '@/attachments/useFileDrop';
 import type { TaskDetail } from '@/api/types';
@@ -349,114 +350,116 @@ export function TaskPanel({ taskId }: { taskId: string }) {
           Drop to attach to this task
         </div>
       )}
-      {header(
-        <>
-          <button
-            type="button"
-            disabled={!canEdit}
-            aria-pressed={t.completed}
-            onClick={() => toggleComplete(t)}
-            className={clsx(
-              'btn border py-1 text-xs',
-              t.completed ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-gray-700 hover:border-green-600 hover:text-green-700',
-            )}
-          >
-            ✓ {t.completed ? 'Completed' : 'Mark complete'}
-          </button>
-          <TaskMenu task={t} canEdit={canEdit} onDeleted={panel.close} />
-        </>,
-      )}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="px-6 pb-6 pt-4">
-          {t.parent && (
-            <button type="button" className="mb-1 text-xs text-gray-500 hover:underline" onClick={() => panel.open(t.parent!.id)}>
-              ‹ {t.parent.title}
-            </button>
-          )}
-          <AutoTextarea
-            label="Task title"
-            value={t.title}
-            disabled={!canEdit}
-            onCommit={(v) => v.trim() && update.mutate({ id: t.id, patch: { title: v.trim() } })}
-            className="-mx-2 text-2xl font-semibold"
-          />
-
-          <div className="mt-4">
-            <FieldRow label="Assignee">
-              <AssigneeField
-                variant="field"
-                assignee={t.assignee}
-                disabled={!canEdit}
-                onChange={(u) => update.mutateAsync({ id: t.id, patch: { assigneeId: u?.id ?? null }, assignee: u, quiet: true })}
-              />
-            </FieldRow>
-            <FieldRow label="Due date">
-              <DueDateField
-                variant="field"
-                value={t.dueDate}
-                completed={t.completed}
-                disabled={!canEdit}
-                onChange={(dueDate) => update.mutate({ id: t.id, patch: { dueDate } })}
-              />
-            </FieldRow>
-            <FieldRow label="Project">
-              {t.project ? (
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <Link to={`/projects/${t.project.id}`} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-gray-100">
-                    <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: t.project.color }} />
-                    {t.project.name}
-                  </Link>
-                  {!t.parentId && (
-                    <select
-                      aria-label="Section"
-                      disabled={!canEdit}
-                      className="rounded border border-gray-200 px-1.5 py-0.5 text-xs text-gray-700"
-                      value={t.sectionId ?? ''}
-                      onChange={(e) => update.mutate({ id: t.id, patch: { sectionId: e.target.value || null } })}
-                    >
-                      <option value="">(No section)</option>
-                      {sections.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-              ) : (
-                <span className="px-1 text-sm text-gray-500">My tasks only</span>
-              )}
-            </FieldRow>
-            <FieldRow label="Priority">
-              <PrioritySelect
-                value={t.priority}
-                disabled={!canEdit}
-                onChange={(priority) => update.mutate({ id: t.id, patch: { priority } })}
-              />
-            </FieldRow>
-          </div>
-
-          <section className="mt-6">
-            <h3 className="mb-1 text-sm font-semibold text-gray-700">Description</h3>
-            <AutoTextarea
-              label="Description"
-              value={t.description ?? ''}
+      <AttachmentViewerProvider task={t} project={project.data}>
+        {header(
+          <>
+            <button
+              type="button"
               disabled={!canEdit}
-              placeholder="What is this task about?"
-              onCommit={(v) => update.mutate({ id: t.id, patch: { description: v.trim() ? v : null } })}
-              className="-mx-2 min-h-[4rem] text-sm"
+              aria-pressed={t.completed}
+              onClick={() => toggleComplete(t)}
+              className={clsx(
+                'btn border py-1 text-xs',
+                t.completed ? 'border-green-600 bg-green-50 text-green-700' : 'border-gray-300 text-gray-700 hover:border-green-600 hover:text-green-700',
+              )}
+            >
+              ✓ {t.completed ? 'Completed' : 'Mark complete'}
+            </button>
+            <TaskMenu task={t} canEdit={canEdit} onDeleted={panel.close} />
+          </>,
+        )}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="px-6 pb-6 pt-4">
+            {t.parent && (
+              <button type="button" className="mb-1 text-xs text-gray-500 hover:underline" onClick={() => panel.open(t.parent!.id)}>
+                ‹ {t.parent.title}
+              </button>
+            )}
+            <AutoTextarea
+              label="Task title"
+              value={t.title}
+              disabled={!canEdit}
+              onCommit={(v) => v.trim() && update.mutate({ id: t.id, patch: { title: v.trim() } })}
+              className="-mx-2 text-2xl font-semibold"
             />
-          </section>
 
-          <AttachmentsSection task={t} project={project.data} canEdit={canEdit} />
+            <div className="mt-4">
+              <FieldRow label="Assignee">
+                <AssigneeField
+                  variant="field"
+                  assignee={t.assignee}
+                  disabled={!canEdit}
+                  onChange={(u) => update.mutateAsync({ id: t.id, patch: { assigneeId: u?.id ?? null }, assignee: u, quiet: true })}
+                />
+              </FieldRow>
+              <FieldRow label="Due date">
+                <DueDateField
+                  variant="field"
+                  value={t.dueDate}
+                  completed={t.completed}
+                  disabled={!canEdit}
+                  onChange={(dueDate) => update.mutate({ id: t.id, patch: { dueDate } })}
+                />
+              </FieldRow>
+              <FieldRow label="Project">
+                {t.project ? (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <Link to={`/projects/${t.project.id}`} className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-gray-100">
+                      <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: t.project.color }} />
+                      {t.project.name}
+                    </Link>
+                    {!t.parentId && (
+                      <select
+                        aria-label="Section"
+                        disabled={!canEdit}
+                        className="rounded border border-gray-200 px-1.5 py-0.5 text-xs text-gray-700"
+                        value={t.sectionId ?? ''}
+                        onChange={(e) => update.mutate({ id: t.id, patch: { sectionId: e.target.value || null } })}
+                      >
+                        <option value="">(No section)</option>
+                        {sections.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                ) : (
+                  <span className="px-1 text-sm text-gray-500">My tasks only</span>
+                )}
+              </FieldRow>
+              <FieldRow label="Priority">
+                <PrioritySelect
+                  value={t.priority}
+                  disabled={!canEdit}
+                  onChange={(priority) => update.mutate({ id: t.id, patch: { priority } })}
+                />
+              </FieldRow>
+            </div>
 
-          {!t.parentId && <SubtaskList task={t} canEdit={canEdit} />}
+            <section className="mt-6">
+              <h3 className="mb-1 text-sm font-semibold text-gray-700">Description</h3>
+              <AutoTextarea
+                label="Description"
+                value={t.description ?? ''}
+                disabled={!canEdit}
+                placeholder="What is this task about?"
+                onCommit={(v) => update.mutate({ id: t.id, patch: { description: v.trim() ? v : null } })}
+                className="-mx-2 min-h-[4rem] text-sm"
+              />
+            </section>
 
-          <StoryFeed task={t} />
+            <AttachmentsSection task={t} project={project.data} canEdit={canEdit} />
+
+            {!t.parentId && <SubtaskList task={t} canEdit={canEdit} />}
+
+            <StoryFeed task={t} />
+          </div>
         </div>
-      </div>
-      <CommentComposer task={t} />
-      <Followers task={t} />
+        <CommentComposer task={t} />
+        <Followers task={t} />
+      </AttachmentViewerProvider>
     </div>
   );
 }

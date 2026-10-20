@@ -162,15 +162,21 @@ export type Attachment = {
   /** Relative paths from the server; never built by hand. */
   contentPath: string | null;
   thumbnailPath: string | null;
+  /** LINK icon / og:image paths, null unless hasIcon / hasImage (§13 A11) */
+  iconPath: string | null;
+  imagePath: string | null;
 };
 
 export type CommentStory = {
   kind: 'comment';
   id: string;
   author: UserSummary;
+  /** may be empty when the comment has attachments (SPEC §13) */
   body: string;
   createdAt: string;
   editedAt: string | null;
+  /** oldest first; absent from servers before §13 */
+  attachments?: Attachment[];
 };
 export type ActivityStory = {
   kind: 'activity';

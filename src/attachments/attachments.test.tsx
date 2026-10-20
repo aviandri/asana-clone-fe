@@ -469,10 +469,13 @@ describe('review fixes (#29)', () => {
     await calls[0].resolve(real.status, JSON.parse(real.text));
     await waitFor(() => expect(calls).toHaveLength(4));
     expect(calls[3].file.name).toBe('q4.txt');
-    // A cancelled one frees its slot too.
-    await u.click(section(dialog).getByRole('button', { name: 'Cancel uploading q2.txt' }));
-    await act(() => new Promise((r) => setTimeout(r, 20)));
+    // A cancelled one frees its slot too: the next queued file starts.
+    await u.upload(within(dialog).getByLabelText('Choose files to attach'), file('q6.txt', 'text/plain'));
+    expect(section(dialog).getAllByText('Waiting to upload…')).toHaveLength(1);
     expect(calls).toHaveLength(4);
+    await u.click(section(dialog).getByRole('button', { name: 'Cancel uploading q2.txt' }));
+    await waitFor(() => expect(calls).toHaveLength(5));
+    expect(calls[4].file.name).toBe('q6.txt');
     expect(section(dialog).queryByText('Waiting to upload…')).toBeNull();
   });
 
@@ -490,5 +493,28 @@ describe('review fixes (#29)', () => {
       'The server is almost out of space.',
     ]);
     expect(section(dialog).getByRole('button', { name: 'Retry uploading s.txt' })).toBeInTheDocument();
+  });
+
+  it('explains a proxy’s bodiless 429 and 507 instead of “Request failed”', async () => {
+    setupMockApi(ALICE);
+    for (const [status, code, message] of [
+      [429, 'RATE_LIMITED', 'Too many uploads. Try again in a few minutes.'],
+      [507, 'INSUFFICIENT_STORAGE', 'The server is out of storage space. Try again later.'],
+    ] as const) {
+      setUploadTransport(async () => ({ status, text: '<html>nginx</html>' }));
+      const err = (await uploadFile('/tasks/t1/attachments', file('x.bin', '')).catch((e: unknown) => e)) as ApiError;
+      expect([err.status, err.code, err.message]).toEqual([status, code, message]);
+    }
+  });
+
+  it('doesn’t call a file of exactly 1 MB cut', async () => {
+    const { dialog } = await openTask(HEADER, ADMIN, (db) => {
+      Object.assign(db.attachments!.find((a) => a.name === 'header-notes.txt')!, { contentUrl: 'http://files.test/exact.txt', size: 1024 * 1024 });
+    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('b'.repeat(1024 * 1024), { status: 206 }));
+    await user().click(section(dialog).getByRole('button', { name: /Attachment, header-notes\.txt/ }));
+    const viewer = await screen.findByRole('dialog', { name: 'header-notes.txt' });
+    await waitFor(() => expect(viewer.querySelector('pre')?.textContent).toHaveLength(1024 * 1024));
+    expect(within(viewer).queryByText(/Showing the first 1 MB/)).toBeNull();
   });
 });

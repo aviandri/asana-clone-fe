@@ -168,11 +168,36 @@ export function cancelUpload(id: string) {
   emit();
 }
 
+/** Stops and forgets every upload of one kind on a task (the composer going away). */
+export function cancelUploads(taskId: string, draft: boolean) {
+  for (const [id, e] of entries) {
+    if (e.item.taskId === taskId && e.item.draft === draft) drop(e, id);
+  }
+  emit();
+}
+
 export function retryUpload(id: string) {
   const e = entries.get(id);
   if (!e || e.item.status !== 'failed' || !e.item.retryable) return;
   update(id, { status: 'queued', progress: 0, error: null });
   pump();
+}
+
+/** The task's uploads right now (not a render's snapshot), for checks made at call time. */
+export function currentUploads(taskId: string, draft: boolean): UploadItem[] {
+  return [...entries.values()].map((e) => e.item).filter((u) => u.taskId === taskId && u.draft === draft);
+}
+
+/** Forgets the failed uploads of one kind on a task (posting a comment clears its failed chips). */
+export function dismissFailedUploads(taskId: string, draft: boolean) {
+  let changed = false;
+  for (const [id, e] of entries) {
+    if (e.item.taskId === taskId && e.item.draft === draft && e.item.status === 'failed') {
+      entries.delete(id);
+      changed = true;
+    }
+  }
+  if (changed) emit();
 }
 
 function subscribe(l: () => void) {

@@ -99,8 +99,8 @@ describe('OAuth consent page', () => {
   });
 
   it.each([
-    ['expired (410)', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests![0].expiresAt = new Date(Date.now() - 1000).toISOString()), 'This request has expired'],
-    ['already decided (409)', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests![0].decidedAt = new Date().toISOString()), 'This request was already answered'],
+    ['expired (410)', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests![0].expiresAt = new Date(Date.now() - 1000).toISOString()), 'This request has expired or was already used'],
+    ['already decided (410, M30)', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests![0].decidedAt = new Date().toISOString()), 'This request has expired or was already used'],
     ['unknown (404)', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests = []), 'This link isn’t valid'],
   ])('explains a request that is %s on the first load', async (_name, prepare, title) => {
     await openConsent(CLAUDE, ADMIN, prepare);

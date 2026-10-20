@@ -102,3 +102,9 @@ export const LinkIcon = (p: P) => (
 export const ChevronLeftIcon = (p: P) => (
   <svg {...base(p)}><path d="m15 6-6 6 6 6" /></svg>
 );
+export const KeyIcon = (p: P) => (
+  <svg {...base(p)}><circle cx="7.5" cy="15.5" r="4.5" /><path d="m10.7 12.3 9.3-9.3M16 7l3 3M14 9l2 2" /></svg>
+);
+export const CopyIcon = (p: P) => (
+  <svg {...base(p)}><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" /></svg>
+);

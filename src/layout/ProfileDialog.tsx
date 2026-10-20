@@ -1,11 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { usersApi } from '@/api/endpoints';
 import { qk } from '@/api/queryKeys';
 import type { Me } from '@/api/types';
 import { useCurrentUser } from '@/auth/useAuth';
 import { Avatar } from '@/components/Avatar';
 import { ColorPicker } from '@/components/ColorPicker';
+import { KeyIcon } from '@/components/icons';
 import { Modal } from '@/components/Modal';
 import { setCelebrationsEnabled, useCelebrationsEnabled } from '@/lib/celebrations';
 import { errorMessage } from '@/lib/errors';
@@ -46,6 +48,8 @@ export function ProfileDialog({ onClose, onCreateWorkspace }: { onClose: () => v
       // PATCH /users/me returns a User; keep the workspace fields of Me.
       qc.setQueryData<Me>(qk.me, (prev) => (prev ? { ...prev, ...u } : prev));
       void qc.invalidateQueries({ queryKey: ['users'] });
+      // A new password revoked every token and connected app (SPEC §14).
+      void qc.invalidateQueries({ queryKey: qk.tokens });
       onClose();
     },
     meta: { quiet: true },
@@ -82,8 +86,20 @@ export function ProfileDialog({ onClose, onCreateWorkspace }: { onClose: () => v
         <section aria-label="Workspaces" className="rounded-lg border border-gray-200 p-1">
           <WorkspaceMenuContent label="Your workspaces" onDone={onClose} onCreate={onCreateWorkspace} />
         </section>
+        <Link
+          to="/settings/tokens"
+          onClick={onClose}
+          className="flex items-center gap-3 rounded-lg border border-gray-200 p-3 text-sm hover:bg-gray-50"
+        >
+          <KeyIcon className="h-4 w-4 text-gray-500" />
+          <span>
+            <span className="block font-medium text-gray-900">API tokens & connected apps</span>
+            <span className="block text-xs text-gray-500">Connect Claude, and manage what can act as you.</span>
+          </span>
+        </Link>
         <fieldset className="space-y-2 rounded-lg border border-gray-200 p-3">
           <legend className="px-1 text-sm font-medium text-gray-700">Change password</legend>
+          <p className="text-xs text-gray-500">Changing it also revokes your API tokens and disconnects your apps.</p>
           <input aria-label="Current password" type="password" autoComplete="current-password" placeholder="Current password" className="input" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} />
           <input aria-label="New password" type="password" autoComplete="new-password" placeholder="New password (min. 8 characters)" className="input" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
         </fieldset>

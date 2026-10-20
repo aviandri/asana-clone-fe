@@ -10,6 +10,7 @@ import type { UploadTransport } from '@/api/upload';
 import { attachmentRoutes } from './attachments';
 import { goalRoutes } from './goals';
 import { reportRoutes } from './reports';
+import { revokeAllTokens, tokenRoutes } from './tokens';
 import { workspaceRoutes } from './workspaces';
 import { uid, type MockDb, type ProjectRow, type TaskRow, type UserRow } from './db';
 
@@ -388,6 +389,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
       if (body.newPassword) {
         if (body.currentPassword !== me!.password) throw invalid('Current password is incorrect');
         me!.password = body.newPassword;
+        revokeAllTokens(db, me!.id);
       }
       if (body.name !== undefined) me!.name = String(body.name);
       if (body.avatarColor !== undefined) me!.avatarColor = String(body.avatarColor);
@@ -999,7 +1001,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   ],
 ];
 
-const compiled = [...routes, ...workspaceRoutes, ...goalRoutes, ...reportRoutes, ...attachmentRoutes].map(([method, pattern, handler, opts]) => {
+const compiled = [...routes, ...workspaceRoutes, ...goalRoutes, ...reportRoutes, ...attachmentRoutes, ...tokenRoutes].map(([method, pattern, handler, opts]) => {
   const keys: string[] = [];
   const re = new RegExp(
     '^' +

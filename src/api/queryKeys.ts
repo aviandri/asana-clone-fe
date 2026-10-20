@@ -22,5 +22,7 @@ export const qk = {
   timePeriods: ['timePeriods'] as const,
   projectReport: (id: string, weeks: number) => ['projectReport', id, weeks] as const,
   overview: (teamId?: string) => ['reportOverview', teamId ?? ''] as const,
+  config: ['config'] as const,
+  tokens: ['tokens'] as const,
   workload: (q: { teamId?: string; from?: string; to?: string }) => ['reportWorkload', q] as const,
 };

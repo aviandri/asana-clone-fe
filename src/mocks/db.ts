@@ -104,6 +104,19 @@ export type ActivityRow = {
   data: unknown;
   createdAt: string;
 };
+/** SPEC §14: a PAT or an OAuth grant. The mock keeps the plaintext's hash out: `secret` stands in for it. */
+export type ApiTokenRow = {
+  id: string;
+  userId: string;
+  name: string;
+  source: 'PAT' | 'OAUTH';
+  scope: 'READ' | 'WRITE';
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+};
 /** SPEC §13. `contentUrl` stands in for the server's storage: a blob:/data: URL the browser can load. */
 export type AttachmentRow = {
   id: string;
@@ -207,6 +220,10 @@ export type MockDb = {
   goalUpdates?: GoalUpdateRow[];
   // v1.3 — optional for the same reason.
   attachments?: AttachmentRow[];
+  // v1.4
+  apiTokens?: ApiTokenRow[];
+  /** `GET /config`; tests turn MCP off with `{ mcpEnabled: false }` */
+  config?: { appUrl?: string; mcpEnabled?: boolean };
 };
 
 export function uid(db: MockDb, prefix = 'id'): string {
@@ -540,6 +557,21 @@ export function createSeedDb(): MockDb {
     read: false,
     createdAt: now,
   });
+  // §14: Admin has connected Claude (an OAuth grant), so the tokens page isn't empty.
+  db.apiTokens = [
+    {
+      id: uid(db, 'tokn'),
+      userId: admin.id,
+      name: 'Claude',
+      source: 'OAUTH',
+      scope: 'WRITE',
+      prefix: 'mpoa_Qx7Lm2v',
+      createdAt: format(addDays(new Date(), -12), "yyyy-MM-dd'T'09:30:00.000'Z'"),
+      lastUsedAt: format(addDays(new Date(), -1), "yyyy-MM-dd'T'15:10:00.000'Z'"),
+      expiresAt: format(addDays(new Date(), 18), "yyyy-MM-dd'T'09:30:00.000'Z'"),
+      revokedAt: null,
+    },
+  ];
   return db;
 }
 

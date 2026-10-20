@@ -24,5 +24,6 @@ export const qk = {
   overview: (teamId?: string) => ['reportOverview', teamId ?? ''] as const,
   config: ['config'] as const,
   tokens: ['tokens'] as const,
+  oauthRequest: (id: string) => ['oauthRequest', id] as const,
   workload: (q: { teamId?: string; from?: string; to?: string }) => ['reportWorkload', q] as const,
 };

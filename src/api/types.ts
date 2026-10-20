@@ -428,3 +428,22 @@ export type CreatedToken = { token: string; info: ApiTokenInfo };
 
 /** `GET /config` (§14 M9). The MCP endpoint is `<appUrl>/mcp`. */
 export type AppConfig = { appUrl: string; mcpEnabled: boolean };
+
+/** `GET /oauth/requests/:id`: a validated authorize request waiting for consent (§14, M7, M11, M12). */
+export type OAuthConsentRequest = {
+  client: {
+    /** client_name: written by whoever registered the client, so shown as plain text only */
+    name: string;
+    /** the host the user is sent back to */
+    redirectHost: string;
+    /** CIMD clients (an https client_id URL, e.g. claude.ai): its host; null for DCR clients */
+    clientIdHost: string | null;
+  };
+  requestedScopes: ('read' | 'write')[];
+  /** the redirect is http://localhost / 127.0.0.1 */
+  isLocalRedirect: boolean;
+  expiresAt: string;
+  user: Me;
+  workspaces: Workspace[];
+};
+export type OAuthDecision = { approve: boolean; scope?: TokenScope };

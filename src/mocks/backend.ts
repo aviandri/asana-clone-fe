@@ -10,6 +10,7 @@ import type { UploadTransport } from '@/api/upload';
 import { attachmentRoutes } from './attachments';
 import { goalRoutes } from './goals';
 import { reportRoutes } from './reports';
+import { oauthRoutes } from './oauth';
 import { revokeAllTokens, tokenRoutes } from './tokens';
 import { workspaceRoutes } from './workspaces';
 import { uid, type MockDb, type ProjectRow, type TaskRow, type UserRow } from './db';
@@ -1001,7 +1002,7 @@ const routes: [string, string, Handler, { public?: boolean }?][] = [
   ],
 ];
 
-const compiled = [...routes, ...workspaceRoutes, ...goalRoutes, ...reportRoutes, ...attachmentRoutes, ...tokenRoutes].map(([method, pattern, handler, opts]) => {
+const compiled = [...routes, ...workspaceRoutes, ...goalRoutes, ...reportRoutes, ...attachmentRoutes, ...tokenRoutes, ...oauthRoutes].map(([method, pattern, handler, opts]) => {
   const keys: string[] = [];
   const re = new RegExp(
     '^' +

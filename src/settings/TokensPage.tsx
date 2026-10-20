@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { differenceInCalendarDays, format, isSameYear } from 'date-fns';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode, type Ref } from 'react';
 import { configApi, tokensApi } from '@/api/endpoints';
 import { qk } from '@/api/queryKeys';
 import type { ApiTokenInfo, CreatedToken, CreateTokenInput, TokenScope } from '@/api/types';
@@ -40,14 +40,15 @@ function Section({ title, children, actions }: { title: string; children: ReactN
 }
 
 /** A value to copy, in a read-only field (selectable by hand too). */
-function CopyField({ value, label, mono = true }: { value: string; label: string; mono?: boolean }) {
+function CopyField({ value, label, inputRef }: { value: string; label: string; inputRef?: Ref<HTMLInputElement> }) {
   return (
     <div className="flex items-center gap-2">
       <input
+        ref={inputRef}
         readOnly
         aria-label={label}
         value={value}
-        className={clsx('input min-w-0 flex-1 bg-gray-50', mono && 'font-mono text-xs')}
+        className="input min-w-0 flex-1 bg-gray-50 font-mono text-xs"
         onFocus={(e) => e.currentTarget.select()}
       />
       <CopyButton text={value} label={`Copy ${label.toLowerCase()}`} />
@@ -168,22 +169,23 @@ function RevokeDialog({ token, onClose }: { token: ApiTokenInfo; onClose: () => 
   );
 }
 
-function CreateForm({ onCreated, onCancel }: { onCreated: (c: CreatedToken) => void; onCancel: () => void }) {
-  const qc = useQueryClient();
+function CreateForm({
+  onSubmit,
+  pending,
+  error,
+  onCancel,
+}: {
+  onSubmit: (input: CreateTokenInput) => void;
+  pending: boolean;
+  error: unknown;
+  onCancel: () => void;
+}) {
   const [name, setName] = useState('');
   const [scope, setScope] = useState<TokenScope>('WRITE');
   const [expiry, setExpiry] = useState<CreateTokenInput['expiresInDays']>(90);
-  const create = useMutation({
-    mutationFn: tokensApi.create,
-    onSuccess: (c) => {
-      void qc.invalidateQueries({ queryKey: qk.tokens });
-      onCreated(c);
-    },
-    meta: { quiet: true },
-  });
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (name.trim()) create.mutate({ name: name.trim(), scope, expiresInDays: expiry });
+    if (name.trim() && !pending) onSubmit({ name: name.trim(), scope, expiresInDays: expiry });
   };
   return (
     <form onSubmit={submit} className="space-y-4 px-5 pb-5 pt-3">
@@ -243,16 +245,17 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (c: CreatedToken) => v
           ))}
         </select>
       </div>
-      {create.isError && (
+      {!!error && (
         <p role="alert" className="text-sm text-red-600">
-          {errorMessage(create.error, 'Couldn’t create the token.')}
+          {errorMessage(error, 'Couldn’t create the token.')}
         </p>
       )}
       <div className="flex justify-end gap-2">
-        <button type="button" className="btn-ghost" onClick={onCancel}>
+        {/* Not while creating: the token would be made and never shown. */}
+        <button type="button" className="btn-ghost" disabled={pending} onClick={onCancel}>
           Cancel
         </button>
-        <button type="submit" className="btn-primary" disabled={!name.trim() || create.isPending}>
+        <button type="submit" className="btn-primary" disabled={!name.trim() || pending}>
           Create token
         </button>
       </div>
@@ -263,12 +266,15 @@ function CreateForm({ onCreated, onCancel }: { onCreated: (c: CreatedToken) => v
 /** Shown once: the server never returns the plaintext again. */
 function CreatedView({ created, url, onDone }: { created: CreatedToken; url: string; onDone: () => void }) {
   const cmd = claudeCodeCommands(url, created.token);
+  // The form that had focus is gone: start on the token (focusing it selects it, ready to copy).
+  const tokenField = useRef<HTMLInputElement>(null);
+  useEffect(() => tokenField.current?.focus(), []);
   return (
     <div className="space-y-4 px-5 pb-5 pt-3">
       <p role="status" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
         Copy this token now. You won’t be able to see it again. Treat it like a password.
       </p>
-      <CopyField value={created.token} label="Token" />
+      <CopyField value={created.token} label="Token" inputRef={tokenField} />
       <div className="space-y-2">
         <h3 className="text-sm font-medium text-gray-900">Add it to Claude Code</h3>
         <Snippet code={cmd.inline} label="Claude Code command" />
@@ -291,10 +297,37 @@ function CreatedView({ created, url, onDone }: { created: CreatedToken; url: str
 }
 
 function CreateTokenDialog({ url, onClose }: { url: string; onClose: () => void }) {
+  const qc = useQueryClient();
   const [created, setCreated] = useState<CreatedToken | null>(null);
+  const create = useMutation({
+    mutationFn: tokensApi.create,
+    // The plaintext must live only in this dialog: not kept in the MutationCache after it closes.
+    gcTime: 0,
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.tokens }),
+    meta: { quiet: true },
+  });
+  const submit = (input: CreateTokenInput) =>
+    create.mutate(input, {
+      onSuccess: (c) => {
+        setCreated(c);
+        // ...and out of the cache right away, not just once the dialog is gone.
+        create.reset();
+      },
+    });
   return (
-    <Modal open onClose={onClose} title={created ? 'Token created' : 'Create token'} width="lg">
-      {created ? <CreatedView created={created} url={url} onDone={onClose} /> : <CreateForm onCreated={setCreated} onCancel={onClose} />}
+    <Modal
+      open
+      onClose={onClose}
+      title={created ? 'Token created' : 'Create token'}
+      width="lg"
+      // Shown once: only Done closes it. While creating, closing would orphan a token never shown.
+      dismissible={!created && !create.isPending}
+    >
+      {created ? (
+        <CreatedView created={created} url={url} onDone={onClose} />
+      ) : (
+        <CreateForm onSubmit={submit} pending={create.isPending} error={create.error} onCancel={onClose} />
+      )}
     </Modal>
   );
 }

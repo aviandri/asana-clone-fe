@@ -7,6 +7,7 @@ import { NotForGuests, RedirectIfAuthed, RequireAdmin, RequireAuth, RequireWorks
 import { FullPageSpinner } from '@/components/Spinner';
 import { AppShell } from '@/layout/AppShell';
 import { MotionRoot } from '@/motion/MotionRoot';
+import { ConsentPage } from '@/connect/ConsentPage';
 import { AcceptInvitePage } from '@/pages/AcceptInvitePage';
 import { HomePage } from '@/pages/HomePage';
 import { InboxPage } from '@/pages/InboxPage';
@@ -43,6 +44,15 @@ export const routes: RouteObject[] = [
         ),
       },
       { path: '/invite/:token', element: <AcceptInvitePage /> },
+      // OAuth consent (SPEC §14): signed in, but outside the shell (no workspace needed, M8).
+      {
+        path: '/connect/authorize',
+        element: (
+          <RequireAuth>
+            <ConsentPage />
+          </RequireAuth>
+        ),
+      },
       {
         element: (
           <RequireAuth>

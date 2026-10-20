@@ -26,7 +26,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
@@ -37,12 +37,60 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
     location = /health {
         proxy_pass ${BACKEND_URL};
+    }
+
+    # MCP (SPEC §14 M5): JSON-RPC over Streamable HTTP, nothing buffered or cached either way.
+    location = /mcp {
+        client_max_body_size 1m;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 60s;
+        proxy_pass ${BACKEND_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # OAuth 2.1 for claude.ai connectors (§14): the authorization server lives in the backend.
+    location /oauth/ {
+        proxy_pass ${BACKEND_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # OAuth discovery (M5): /.well-known/oauth-* is the backend's; anything else there is a 404, not the SPA.
+    location ^~ /.well-known/oauth- {
+        proxy_pass ${BACKEND_URL};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location ^~ /.well-known/ {
+        return 404;
+    }
+
+    # The OAuth consent page (M4): never framed (clickjacking). Headers, because a <meta> CSP can't
+    # set frame-ancestors. index.html is served from this location (try_files with a file, not a
+    # URI fallback, so no internal redirect drops the headers).
+    location ^~ /connect/ {
+        add_header Content-Security-Policy "frame-ancestors 'none'" always;
+        add_header X-Frame-Options DENY always;
+        add_header Cache-Control "no-cache";
+        try_files /index.html =404;
     }
 
     # Vite emits content-hashed filenames, so these can be cached forever.

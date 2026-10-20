@@ -138,7 +138,7 @@ function Consent({ id, request }: { id: string; request: OAuthConsentRequest }) 
           <p className="text-xs text-gray-500">
             {workspaces.length === 0
               ? 'In every workspace you join, with your role there.'
-              : `In ${workspaces.length === 1 ? 'your workspace' : `all ${workspaces.length} of your workspaces`}, with your role in each: ${workspaces
+              : `${workspaces.length === 1 ? 'In your workspace, with your role there' : `In all ${workspaces.length} of your workspaces, with your role in each`}: ${workspaces
                   .map((w) => `${w.name} (${ROLE_LABEL[w.myRole]})`)
                   .join(', ')}.`}
           </p>

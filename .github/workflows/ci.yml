@@ -47,7 +47,7 @@ jobs:
         run: |
           docker run --rm --add-host be:127.0.0.1 asana-clone-fe:ci \
             sh -c '/docker-entrypoint.d/20-envsubst-on-templates.sh && nginx -t'
-      - name: Check body limits through nginx (105m streamed on uploads, 2m buffered elsewhere)
+      - name: Check body limits, MCP/OAuth routes and consent headers through nginx
         run: |
           set -euo pipefail
           docker network create nginx-limits
@@ -60,7 +60,8 @@ jobs:
                   self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers()
                   self.wfile.write(body)
               def do_GET(self):
-                  self.reply("ready")
+                  # /api/v1/xff echoes the X-Forwarded-For the backend received (SPEC §14 M2).
+                  self.reply(self.headers.get("X-Forwarded-For", "") if self.path == "/api/v1/xff" else "ready")
               def do_POST(self):
                   left, got = int(self.headers.get("Content-Length", 0)), 0
                   while left:
@@ -109,6 +110,30 @@ jobs:
           check /api/v1/tasks/t1/comments 3m.bin 413 - "other /api/ routes keep 2m"
           check /api/v1/tasks/t1/attachments/extra 3m.bin 413 - "the upload regex is anchored"
           check /health 3m.bin 413 - "2m outside /api/"
+          # SPEC §14 M5: /mcp streams and caps at 1m.
+          check /mcp 1m.bin 200 streamed "mcp streams 1 MB"
+          check /mcp 3m.bin 413 - "mcp caps at 1m"
+          # get <path> <expected status> <expected body or -> <what>
+          get() {
+            local code
+            code=$(curl -sS -o body.txt -D headers.txt -w '%{http_code}' "localhost:8080$1" || true)
+            echo "GET $1 -> $code"
+            [ "$code" = "$2" ] || { echo "expected $2: $4"; exit 1; }
+            [ "$3" = - ] || [ "$(cat body.txt)" = "$3" ] || { echo "expected body '$3', got '$(head -c 200 body.txt)': $4"; exit 1; }
+          }
+          get /oauth/authorize 200 ready "/oauth/ goes to the backend"
+          get /.well-known/oauth-authorization-server 200 ready "OAuth metadata goes to the backend"
+          get /.well-known/oauth-protected-resource/mcp 200 ready "resource metadata goes to the backend"
+          get /.well-known/security.txt 404 - "other /.well-known paths are 404, not the SPA"
+          # M4: the consent page is the SPA, never framable, by header.
+          get '/connect/authorize?request=abc' 200 - "consent page is served"
+          grep -q 'id="root"' body.txt || { echo "consent page isn't index.html"; exit 1; }
+          grep -qi "^content-security-policy: frame-ancestors 'none'" headers.txt || { echo "consent page lacks frame-ancestors 'none'"; cat headers.txt; exit 1; }
+          grep -qi '^x-frame-options: DENY' headers.txt || { echo "consent page lacks X-Frame-Options DENY"; cat headers.txt; exit 1; }
+          # M2: nginx overwrites X-Forwarded-For, so a client can't pick its rate-limit bucket.
+          xff=$(curl -fsS -H 'X-Forwarded-For: 6.6.6.6' localhost:8080/api/v1/xff)
+          echo "X-Forwarded-For at the backend: $xff"
+          case "$xff" in *6.6.6.6*|*,*|'') echo "nginx passed a client-chosen X-Forwarded-For through"; exit 1 ;; esac
       - name: nginx and stub logs
         if: failure()
         run: docker logs fe || true; docker logs be || true

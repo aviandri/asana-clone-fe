@@ -266,15 +266,20 @@ describe('comment attachments in the viewer', () => {
 });
 
 /** Holds `POST /tasks/:id/comments` until released; everything else goes straight to the mock. */
-function gateComments(db: ReturnType<typeof setupMockApi>) {
+function gateComments(db: ReturnType<typeof setupMockApi>, opts: { fail?: boolean } = {}) {
   const base = createMockFetch(() => db);
   let open: () => void = () => undefined;
   const held = new Promise<void>((r) => (open = r));
+  const deleted: string[] = [];
   setFetch(async (input, init) => {
-    if (init?.method === 'POST' && /\/tasks\/[^/]+\/comments$/.test(input)) await held;
+    if (init?.method === 'DELETE') deleted.push(input);
+    if (init?.method === 'POST' && /\/tasks\/[^/]+\/comments$/.test(input)) {
+      await held;
+      if (opts.fail) return new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'boom' } }), { status: 500 });
+    }
     return base(input, init);
   });
-  return { release: () => act(async () => open()) };
+  return { release: () => act(async () => open()), deleted };
 }
 
 describe('posting with drafts (#30 review)', () => {
@@ -305,6 +310,43 @@ describe('posting with drafts (#30 review)', () => {
     expect(late.draft).toBe(true);
     await u.click(within(dialog).getByRole('button', { name: 'Close task details' }));
     await waitFor(() => expect(db.attachments!.some((a) => a.id === late.id)).toBe(false));
+  });
+
+  it('posts the drafts being sent when the panel closes mid-post', async () => {
+    const { db, task, dialog, composer } = await openTask();
+    const u = user();
+    await u.click(within(dialog).getByRole('textbox', { name: 'Add a comment' }));
+    await u.type(within(dialog).getByRole('textbox', { name: 'Add a comment' }), 'see attached');
+    await u.upload(composer().getByLabelText('Choose files for the comment'), file('kept.txt'));
+    await composer().findByRole('button', { name: 'Remove kept.txt' });
+    const draft = db.attachments!.find((a) => a.name === 'kept.txt')!;
+    const gate = gateComments(db);
+    await u.click(composer().getByRole('button', { name: 'Comment' }));
+    await u.click(within(dialog).getByRole('button', { name: 'Close task details' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: HEADER })).toBeNull());
+
+    await gate.release();
+    await waitFor(() => expect(db.comments.some((c) => c.taskId === task.id && c.body === 'see attached')).toBe(true));
+    const comment = db.comments.find((c) => c.taskId === task.id && c.body === 'see attached')!;
+    await waitFor(() => expect(db.attachments!.find((a) => a.id === draft.id)?.commentId).toBe(comment.id));
+    expect(gate.deleted.filter((url) => url.includes(draft.id))).toEqual([]);
+  });
+
+  it('deletes the drafts of a post that fails after the panel closed', async () => {
+    const { db, dialog, composer } = await openTask();
+    const u = user();
+    await u.click(within(dialog).getByRole('textbox', { name: 'Add a comment' }));
+    await u.upload(composer().getByLabelText('Choose files for the comment'), file('orphan.txt'));
+    await composer().findByRole('button', { name: 'Remove orphan.txt' });
+    const draft = db.attachments!.find((a) => a.name === 'orphan.txt')!;
+    const gate = gateComments(db, { fail: true });
+    await u.click(composer().getByRole('button', { name: 'Comment' }));
+    await u.click(within(dialog).getByRole('button', { name: 'Close task details' }));
+    expect(gate.deleted).toEqual([]);
+
+    // Nobody can send it again, so it doesn't wait for the sweeper.
+    await gate.release();
+    await waitFor(() => expect(db.attachments!.some((a) => a.id === draft.id)).toBe(false));
   });
 
   it('keeps the chips when the server rejects attachmentIds', async () => {

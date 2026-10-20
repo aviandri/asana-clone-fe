@@ -21,7 +21,10 @@ const forget = (a: Attachment) => void attachmentsApi.delete(a.id).catch(() => u
  * Posting is a lifecycle, because attaching stays open while a post is in flight:
  * [beginPost] marks the ids being sent (their chips can't be removed meanwhile), [posted] then
  * drops exactly those (anything added meanwhile stays for the next comment, and is still cleaned
- * up on leaving), and [postFailed] keeps them all.
+ * up on leaving), and [postFailed] keeps them all. Leaving mid-post doesn't delete the drafts being
+ * sent: the post finishes without the composer, and only a failed one deletes them then. So
+ * [posted] and [postFailed] must be called even after unmount (from the useMutation-level
+ * callbacks, not mutate()'s, which TanStack Query skips once the component is gone).
  */
 export function useComposerDrafts(task: Pick<TaskDetail, 'id'>) {
   const taskId = task.id;
@@ -30,6 +33,8 @@ export function useComposerDrafts(task: Pick<TaskDetail, 'id'>) {
   const uploads = useUploads(taskId, true);
   // The drafts as of now (not the last render): what leaving deletes, what the limit counts.
   const latest = useRef<Attachment[]>([]);
+  // The ids being posted as of now, for the unmount cleanup (which mustn't delete them).
+  const sendingIds = useRef<ReadonlySet<string>>(new Set());
   const linksInFlight = useRef(0);
   const mounted = useRef(true);
 
@@ -43,8 +48,9 @@ export function useComposerDrafts(task: Pick<TaskDetail, 'id'>) {
     return () => {
       mounted.current = false;
       cancelUploads(taskId, true);
-      latest.current.forEach(forget);
-      latest.current = [];
+      // The drafts being posted stay: they're the comment's once it lands (or postFailed deletes them).
+      latest.current.filter((a) => !sendingIds.current.has(a.id)).forEach(forget);
+      latest.current = latest.current.filter((a) => sendingIds.current.has(a.id));
     };
   }, [taskId]);
 
@@ -89,28 +95,44 @@ export function useComposerDrafts(task: Pick<TaskDetail, 'id'>) {
   const remove = useCallback(
     (a: Attachment) => {
       // Being posted right now: deleting it would pull it out from under the comment.
-      if (sending.has(a.id)) return;
+      if (sendingIds.current.has(a.id)) return;
       setLatest((d) => d.filter((x) => x.id !== a.id));
       forget(a);
     },
-    [sending, setLatest],
+    [setLatest],
   );
 
-  const beginPost = useCallback((ids: string[]) => setSending(new Set(ids)), []);
+  const markSending = useCallback((ids: Iterable<string>) => {
+    sendingIds.current = new Set(ids);
+    if (mounted.current) setSending(sendingIds.current);
+  }, []);
+
+  const beginPost = useCallback((ids: string[]) => markSending(ids), [markSending]);
 
   /** The comment is in: its drafts belong to it now, so they mustn't be deleted on leaving. */
   const posted = useCallback(
     (ids: string[]) => {
       const sent = new Set(ids);
-      setLatest((d) => d.filter((x) => !sent.has(x.id)));
-      setSending(new Set());
+      if (mounted.current) setLatest((d) => d.filter((x) => !sent.has(x.id)));
+      else latest.current = latest.current.filter((x) => !sent.has(x.id));
+      markSending([]);
       // A failed upload's chip would otherwise linger and look like part of the next comment.
       dismissFailedUploads(taskId, true);
     },
-    [taskId, setLatest],
+    [taskId, setLatest, markSending],
   );
 
-  const postFailed = useCallback(() => setSending(new Set()), []);
+  const postFailed = useCallback(
+    (ids: string[]) => {
+      markSending([]);
+      if (mounted.current) return;
+      // The composer is gone, so nobody will send these again.
+      const sent = new Set(ids);
+      latest.current.filter((x) => sent.has(x.id)).forEach(forget);
+      latest.current = latest.current.filter((x) => !sent.has(x.id));
+    },
+    [markSending],
+  );
 
   const count = drafts.length + uploads.filter((u) => u.status !== 'failed').length;
   return {

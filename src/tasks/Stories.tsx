@@ -167,9 +167,14 @@ function CommentItem({ story, task }: { story: CommentStory; task: TaskDetail })
 export function CommentComposer({ task }: { task: TaskDetail }) {
   const me = useCurrentUser();
   const users = useUsers();
-  const { add } = useCommentMutations(task);
   // Attachments live here as server drafts until the comment is posted (SPEC §13).
   const drafts = useComposerDrafts(task);
+  // The drafts' side of a post settles even if the panel closed meanwhile.
+  const { add } = useCommentMutations(task, {
+    onAdded: (v) => drafts.posted(v.attachmentIds ?? []),
+    // The chips stay (and stay removable) so the comment can be sent again.
+    onAddFailed: (v) => drafts.postFailed(v.attachmentIds ?? []),
+  });
   const fileInput = useRef<HTMLInputElement>(null);
   const [addingLink, setAddingLink] = useState(false);
   const attachFiles = (files: File[]) => {
@@ -242,10 +247,7 @@ export function CommentComposer({ task }: { task: TaskDetail }) {
         onSuccess: () => {
           setText('');
           setPicked([]);
-          drafts.posted(sent);
         },
-        // The chips stay (and stay removable) so the comment can be sent again.
-        onError: drafts.postFailed,
       },
     );
   };

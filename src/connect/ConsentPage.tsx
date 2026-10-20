@@ -88,13 +88,22 @@ function Consent({ id, request }: { id: string; request: OAuthConsentRequest }) 
   const canWrite = request.requestedScopes.includes('write');
   const [readOnly, setReadOnly] = useState(false);
   const expired = useExpired(request.expiresAt);
+  const [badRedirect, setBadRedirect] = useState(false);
   const decide = useMutation({
     mutationFn: (body: OAuthDecision) => oauthApi.decide(id, body),
     onSuccess: ({ redirectUrl }) => {
       if (isSafeRedirect(redirectUrl)) leave.to(redirectUrl);
+      else setBadRedirect(true);
     },
     meta: { quiet: true },
   });
+  // The request is decided either way, so there's nothing to retry here.
+  if (badRedirect)
+    return (
+      <Message title="Couldn’t go back to the app">
+        {`${client.name} gave an address Mekari Project won’t open. Go back to the app and try connecting again.`}
+      </Message>
+    );
   const gone = expired ? 'expired' : goneFrom(decide.error);
   if (gone) return <Message title={GONE_COPY[gone].title}>{GONE_COPY[gone].body}</Message>;
   const leaving = decide.isSuccess;

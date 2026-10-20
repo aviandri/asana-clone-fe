@@ -60,8 +60,9 @@ jobs:
                   self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers()
                   self.wfile.write(body)
               def do_GET(self):
-                  # /api/v1/xff echoes the X-Forwarded-For the backend received (SPEC §14 M2).
-                  self.reply(self.headers.get("X-Forwarded-For", "") if self.path == "/api/v1/xff" else "ready")
+                  # These echo the X-Forwarded-For the backend received (SPEC §14 M2).
+                  echo = self.path in ("/api/v1/xff", "/health?xff", "/mcp?xff", "/oauth/xff", "/.well-known/oauth-xff")
+                  self.reply(self.headers.get("X-Forwarded-For", "") if echo else "ready")
               def do_POST(self):
                   left, got = int(self.headers.get("Content-Length", 0)), 0
                   while left:
@@ -130,10 +131,12 @@ jobs:
           grep -q 'id="root"' body.txt || { echo "consent page isn't index.html"; exit 1; }
           grep -qi "^content-security-policy: frame-ancestors 'none'" headers.txt || { echo "consent page lacks frame-ancestors 'none'"; cat headers.txt; exit 1; }
           grep -qi '^x-frame-options: DENY' headers.txt || { echo "consent page lacks X-Frame-Options DENY"; cat headers.txt; exit 1; }
-          # M2: nginx overwrites X-Forwarded-For, so a client can't pick its rate-limit bucket.
-          xff=$(curl -fsS -H 'X-Forwarded-For: 6.6.6.6' localhost:8080/api/v1/xff)
-          echo "X-Forwarded-For at the backend: $xff"
-          case "$xff" in *6.6.6.6*|*,*|'') echo "nginx passed a client-chosen X-Forwarded-For through"; exit 1 ;; esac
+          # M2: every proxy location overwrites X-Forwarded-For, so a client can't pick its rate-limit bucket.
+          for path in /api/v1/xff '/health?xff' '/mcp?xff' /oauth/xff /.well-known/oauth-xff; do
+            xff=$(curl -fsS -H 'X-Forwarded-For: 6.6.6.6' "localhost:8080$path")
+            echo "X-Forwarded-For at the backend via $path: $xff"
+            case "$xff" in *6.6.6.6*|*,*|'') echo "nginx passed a client-chosen X-Forwarded-For through on $path"; exit 1 ;; esac
+          done
       - name: nginx and stub logs
         if: failure()
         run: docker logs fe || true; docker logs be || true

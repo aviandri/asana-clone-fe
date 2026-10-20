@@ -99,10 +99,10 @@ describe('OAuth consent page', () => {
   });
 
   it.each([
-    ['expired', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests![0].expiresAt = new Date(Date.now() - 1000).toISOString()), 'This request has expired'],
-    ['already decided', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests![0].decidedAt = new Date().toISOString()), 'This request was already answered'],
-    ['unknown', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests = []), 'This link isn’t valid'],
-  ])('explains a request that is %s', async (_name, prepare, title) => {
+    ['expired (410)', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests![0].expiresAt = new Date(Date.now() - 1000).toISOString()), 'This request has expired'],
+    ['already decided (409)', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests![0].decidedAt = new Date().toISOString()), 'This request was already answered'],
+    ['unknown (404)', (db: ReturnType<typeof setupMockApi>) => (db.oauthRequests = []), 'This link isn’t valid'],
+  ])('explains a request that is %s on the first load', async (_name, prepare, title) => {
     await openConsent(CLAUDE, ADMIN, prepare);
     expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Allow' })).toBeNull();
@@ -138,7 +138,9 @@ describe('OAuth consent page', () => {
       return base(input, init);
     });
     await user().click(await screen.findByRole('button', { name: 'Allow' }));
-    await screen.findByText(/Taking you back/);
+    // Not stuck on "Taking you back…": it says what happened.
+    expect(await screen.findByRole('heading', { name: 'Couldn’t go back to the app' })).toBeInTheDocument();
+    expect(screen.queryByText(/Taking you back/)).toBeNull();
     expect(left).not.toHaveBeenCalled();
   });
 

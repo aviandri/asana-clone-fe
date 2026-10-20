@@ -20,6 +20,11 @@ describe('safeNext', () => {
       '/\n/evil.com',
       'javascript:alert(1)',
       'evil.com',
+      // Dot segments normalize to a protocol-relative pathname.
+      '/.//evil.com',
+      '/x/..//evil.com',
+      '/%2e//evil.com',
+      '/%2E%2E//evil.com',
     ]) {
       expect(safeNext(bad)).toBe('/');
     }

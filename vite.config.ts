@@ -22,6 +22,10 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: 'http://localhost:3000', changeOrigin: true },
+      // MCP + OAuth (SPEC §14), like nginx.
+      '/mcp': { target: 'http://localhost:3000', changeOrigin: true },
+      '/oauth/': { target: 'http://localhost:3000', changeOrigin: true },
+      '/.well-known/oauth-': { target: 'http://localhost:3000', changeOrigin: true },
     },
   },
   test: {

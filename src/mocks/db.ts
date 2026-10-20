@@ -117,6 +117,18 @@ export type ApiTokenRow = {
   expiresAt: string | null;
   revokedAt: string | null;
 };
+/** §14 M18: a validated authorize request, waiting for the user's decision. */
+export type OAuthRequestRow = {
+  id: string;
+  clientName: string;
+  clientIdHost: string | null;
+  redirectUri: string;
+  scope: 'read' | 'read write';
+  state: string;
+  expiresAt: string;
+  decidedAt: string | null;
+  userId: string | null;
+};
 /** SPEC §13. `contentUrl` stands in for the server's storage: a blob:/data: URL the browser can load. */
 export type AttachmentRow = {
   id: string;
@@ -222,6 +234,7 @@ export type MockDb = {
   attachments?: AttachmentRow[];
   // v1.4
   apiTokens?: ApiTokenRow[];
+  oauthRequests?: OAuthRequestRow[];
   /** `GET /config`; tests turn MCP off with `{ mcpEnabled: false }` */
   config?: { appUrl?: string; mcpEnabled?: boolean };
 };
@@ -570,6 +583,32 @@ export function createSeedDb(): MockDb {
       lastUsedAt: format(addDays(new Date(), -1), "yyyy-MM-dd'T'15:10:00.000'Z'"),
       expiresAt: format(addDays(new Date(), 18), "yyyy-MM-dd'T'09:30:00.000'Z'"),
       revokedAt: null,
+    },
+  ];
+  // §14: consent requests to try /connect/authorize?request=<id> in mock mode (they don't expire).
+  const far = new Date(Date.now() + 365 * 86_400_000).toISOString();
+  db.oauthRequests = [
+    {
+      id: 'demo-claude',
+      clientName: 'Claude',
+      clientIdHost: 'claude.ai',
+      redirectUri: 'https://claude.ai/api/mcp/auth_callback',
+      scope: 'read write',
+      state: 'demo',
+      expiresAt: far,
+      decidedAt: null,
+      userId: null,
+    },
+    {
+      id: 'demo-local',
+      clientName: 'Claude Code',
+      clientIdHost: null,
+      redirectUri: 'http://localhost:53682/callback',
+      scope: 'read',
+      state: 'demo',
+      expiresAt: far,
+      decidedAt: null,
+      userId: null,
     },
   ];
   return db;

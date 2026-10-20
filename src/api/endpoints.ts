@@ -6,6 +6,8 @@ import type {
   Attachment,
   CreatedToken,
   CreateTokenInput,
+  OAuthConsentRequest,
+  OAuthDecision,
   CreateGoalInput,
   CreateKeyResultInput,
   CreateProjectInput,
@@ -226,4 +228,11 @@ export const tokensApi = {
   list: () => http.get<ListResponse<ApiTokenInfo>>('/me/tokens'),
   create: (body: CreateTokenInput) => http.post<CreatedToken>('/me/tokens', body),
   revoke: (id: string) => http.delete(`/me/tokens/${id}`),
+};
+
+/** The consent page's side of the OAuth flow (§14). The FE never sees the raw authorize parameters. */
+export const oauthApi = {
+  request: (id: string) => http.get<OAuthConsentRequest>(`/oauth/requests/${encodeURIComponent(id)}`),
+  decide: (id: string, body: OAuthDecision) =>
+    http.post<{ redirectUrl: string }>(`/oauth/requests/${encodeURIComponent(id)}/decision`, body),
 };

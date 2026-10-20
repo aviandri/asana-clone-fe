@@ -404,3 +404,27 @@ export type WorkloadReport = {
   to: string;
   data: { user: UserSummary; open: number; overdue: number; dueInRange: number; completedInRange: number }[];
 };
+
+// ---- MCP & API tokens (SPEC §14) ----
+
+export type TokenScope = 'READ' | 'WRITE';
+
+/** A personal access token, or a connected app's OAuth grant (one row per grant). */
+export type ApiTokenInfo = {
+  id: string;
+  name: string;
+  source: 'PAT' | 'OAUTH';
+  scope: TokenScope;
+  /** the first 12 characters, for recognising it: "mpat_Ab3dE6g" */
+  prefix: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+};
+
+export type CreateTokenInput = { name: string; scope: TokenScope; expiresInDays: 30 | 90 | 365 | null };
+/** The plaintext token is returned once, here. */
+export type CreatedToken = { token: string; info: ApiTokenInfo };
+
+/** `GET /config` (§14 M9). The MCP endpoint is `<appUrl>/mcp`. */
+export type AppConfig = { appUrl: string; mcpEnabled: boolean };

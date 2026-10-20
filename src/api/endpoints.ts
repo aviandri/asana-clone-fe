@@ -1,7 +1,11 @@
 import { API_BASE, http, request, withQuery } from './client';
 import { uploadFile, type UploadOpts } from './upload';
 import type {
+  ApiTokenInfo,
+  AppConfig,
   Attachment,
+  CreatedToken,
+  CreateTokenInput,
   CreateGoalInput,
   CreateKeyResultInput,
   CreateProjectInput,
@@ -211,4 +215,15 @@ export const attachmentUrls = {
   // Server-cached (clients never contact third-party hosts); the server's paths (§13 A11).
   linkIcon: (a: Pick<Attachment, 'iconPath'>) => a.iconPath,
   linkImage: (a: Pick<Attachment, 'imagePath'>) => a.imagePath,
+};
+
+export const configApi = {
+  get: () => http.get<AppConfig>('/config'),
+};
+
+/** Personal access tokens and connected apps (SPEC §14). Revoking an app's row ends its whole grant. */
+export const tokensApi = {
+  list: () => http.get<ListResponse<ApiTokenInfo>>('/me/tokens'),
+  create: (body: CreateTokenInput) => http.post<CreatedToken>('/me/tokens', body),
+  revoke: (id: string) => http.delete(`/me/tokens/${id}`),
 };

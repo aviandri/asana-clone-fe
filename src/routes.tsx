@@ -14,6 +14,7 @@ import { LoginPage } from '@/pages/LoginPage';
 import { MyTasksPage } from '@/pages/MyTasksPage';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { ProjectPage } from '@/projects/ProjectPage';
+import { TokensPage } from '@/settings/TokensPage';
 import { TeamPage } from '@/teams/TeamPage';
 import { TeamsPage } from '@/teams/TeamsPage';
 import { OnboardingPage } from '@/workspace/OnboardingPage';
@@ -77,6 +78,7 @@ export const routes: RouteObject[] = [
               </RequireAdmin>
             ),
           },
+          { path: 'settings/tokens', element: <TokensPage /> },
           // Pre-v1.2 URL.
           { path: 'admin', element: <Navigate to="/workspace/settings" replace /> },
           { path: '*', element: <NotFoundPage /> },

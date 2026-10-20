@@ -19,6 +19,7 @@ export function Modal({
   hideTitle,
   position = 'center',
   width = 'md',
+  dismissible = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,6 +30,8 @@ export function Modal({
   position?: 'center' | 'top';
   /** A prop, not a class: Tailwind emits `max-w-md` after `max-w-lg`/`-5xl`, so classes can't override it. */
   width?: keyof typeof WIDTH;
+  /** false: Escape, the backdrop and the X don't close it (e.g. a secret that's shown once); the content must offer a way out. */
+  dismissible?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
@@ -37,6 +40,8 @@ export function Modal({
   // cleanup, to whatever had it before), yanking keyboard focus off the control in use.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const dismissibleRef = useRef(dismissible);
+  dismissibleRef.current = dismissible;
 
   useEffect(() => {
     if (!open) return;
@@ -50,7 +55,7 @@ export function Modal({
       if (e.key === 'Escape') {
         e.stopPropagation();
         e.preventDefault();
-        onCloseRef.current();
+        if (dismissibleRef.current) onCloseRef.current();
       } else if (e.key === 'Tab' && el) {
         const items = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)];
         if (items.length === 0) return;
@@ -81,7 +86,7 @@ export function Modal({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1, transition: enter }}
           exit={{ opacity: 0, transition: exit }}
-          onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+          onMouseDown={(e) => dismissible && e.target === e.currentTarget && onClose()}
         >
           <m.div
             ref={ref}
@@ -98,9 +103,11 @@ export function Modal({
               <h2 id={titleId} className="flex-1 text-lg font-semibold">
                 {title}
               </h2>
-              <button type="button" aria-label="Close" className="btn-ghost p-1.5" onClick={onClose}>
-                <XIcon />
-              </button>
+              {dismissible && (
+                <button type="button" aria-label="Close" className="btn-ghost p-1.5" onClick={onClose}>
+                  <XIcon />
+                </button>
+              )}
             </div>
             {children}
           </m.div>

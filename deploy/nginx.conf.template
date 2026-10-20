@@ -9,6 +9,16 @@ server {
     # Max gap between two reads of a request body (nginx's default, made explicit): a client that
     # stalls longer gets 408, so a trickled body can't hold a connection open indefinitely.
     client_body_timeout 60s;
+
+    # Behind Cloudflare or a load balancer? Every proxy below sends X-Forwarded-For: $remote_addr
+    # (SPEC §14 M2), which would then be the proxy's address, putting all clients in one rate-limit
+    # bucket. Restore the client address first; see "Upgrading to v1.4" in the BE repo's deploy/README.md.
+    # set_real_ip_from 173.245.48.0/20;    # your proxy's CIDR(s), one line each; never 0.0.0.0/0
+    # real_ip_header CF-Connecting-IP;     # Cloudflare
+    # # or, behind a load balancer that appends to X-Forwarded-For:
+    # real_ip_header X-Forwarded-For;
+    # real_ip_recursive on;
+
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 

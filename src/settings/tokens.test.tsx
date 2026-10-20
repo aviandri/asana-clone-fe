@@ -1,6 +1,8 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { setFetch } from '@/api/client';
+import { createMockFetch } from '@/mocks/backend';
 import type { TaskRow } from '@/mocks/db';
 import { ADMIN, ALICE, BOB, renderApp, setupMockApi } from '@/test/utils';
 import { claudeCodeCommands } from './tokens';
@@ -66,6 +68,55 @@ describe('API tokens & connected apps', () => {
     // The plaintext is gone for good.
     expect(screen.queryByDisplayValue(token)).toBeNull();
     expect(document.body.textContent).not.toContain(token);
+  });
+
+  it('keeps the shown-once token out of the query cache, and only Done closes it', async () => {
+    const { queryClient, list } = await openTokens();
+    const u = user();
+    await u.click(await screen.findByRole('button', { name: 'Create token' }));
+    await u.type(within(screen.getByRole('dialog', { name: 'Create token' })).getByRole('textbox', { name: 'Name' }), 'cli');
+    await u.click(within(screen.getByRole('dialog', { name: 'Create token' })).getByRole('button', { name: 'Create token' }));
+    const done = await screen.findByRole('dialog', { name: 'Token created' });
+    const field = within(done).getByRole('textbox', { name: 'Token' }) as HTMLInputElement;
+    // Focus moves to the token (the form that had it is gone).
+    await waitFor(() => expect(field).toHaveFocus());
+    const leaked = () => queryClient.getMutationCache().getAll().filter((m) => JSON.stringify(m.state.data ?? null).includes(field.value));
+    await waitFor(() => expect(leaked()).toEqual([]));
+
+    // Escape, the backdrop and a close button don't lose it before it's copied.
+    await u.keyboard('{Escape}');
+    fireEvent.mouseDown(done.parentElement!);
+    expect(screen.getByRole('dialog', { name: 'Token created' })).toBeInTheDocument();
+    expect(within(done).queryByRole('button', { name: 'Close' })).toBeNull();
+
+    await u.click(within(done).getByRole('button', { name: 'Done' }));
+    await within(list()).findByText('cli');
+    expect(leaked()).toEqual([]);
+    expect(JSON.stringify(queryClient.getQueryCache().getAll().map((q) => q.state.data))).not.toContain(field.value);
+  });
+
+  it('can’t be cancelled or closed while the token is being created', async () => {
+    const { db } = await openTokens();
+    const base = createMockFetch(() => db);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((r) => (release = r));
+    setFetch(async (input, init) => {
+      if (init?.method === 'POST' && input.endsWith('/me/tokens')) await held;
+      return base(input, init);
+    });
+    const u = user();
+    await u.click(await screen.findByRole('button', { name: 'Create token' }));
+    const dialog = screen.getByRole('dialog', { name: 'Create token' });
+    await u.type(within(dialog).getByRole('textbox', { name: 'Name' }), 'slow');
+    await u.click(within(dialog).getByRole('button', { name: 'Create token' }));
+    expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(within(dialog).queryByRole('button', { name: 'Close' })).toBeNull();
+    await u.keyboard('{Escape}');
+    fireEvent.mouseDown(dialog.parentElement!);
+    expect(screen.getByRole('dialog', { name: 'Create token' })).toBeInTheDocument();
+
+    await act(async () => release());
+    expect(await screen.findByRole('dialog', { name: 'Token created' })).toBeInTheDocument();
   });
 
   it('shows the server’s message when the token limit is reached', async () => {

@@ -16,6 +16,14 @@ Mock mode logs: `admin@example.com` / `password123` (also `alice@`, `bob@`, `car
 Mock data persists in `localStorage`; run `__resetMockDb()` in the devtools console to reseed.
 The mock is only enabled when `VITE_MOCK=true`, and is tree-shaken out of production builds.
 
+Node 20 (CI and the Docker build stage). `npm ci` warns that `pdfjs-dist` wants node ≥22.13. That's
+expected, so don't upgrade Node or pdf.js because of it. The requirement covers pdf.js *running in*
+Node (its Node-only code paths use `process.getBuiltinModule`, behind an `isNodeJS` check). We only
+run it in the browser:
+- Vite just parses the library at build time.
+- The worker is copied byte-for-byte as an asset.
+- Unit tests mock `PdfViewer`.
+
 ## Scripts
 
 | | |

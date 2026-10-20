@@ -24,7 +24,7 @@ The mock is only enabled when `VITE_MOCK=true`, and is tree-shaken out of produc
 | `npm run lint` | ESLint (zero warnings allowed) |
 | `npm test` | Vitest (jsdom), single worker |
 | `npm run build` | typecheck + production build to `dist/` |
-| `npm run test:contract` | FE↔BE contract smoke test against a running backend (`BASE_URL`, seed users; see header of `scripts/contract-smoke.mjs`) |
+| `npm run test:contract` | FE↔BE contract smoke test against a running backend (`BASE_URL`, seed users; see header of `scripts/contract-smoke.mjs`). FE CI doesn't run it: BE CI does, so test a change with `gh workflow run ci.yml -R aviandri/asana-clone-be -f fe_ref=<branch>` |
 
 On the shared dev box, wrap heavy commands with `/home/claude/projects/asana-clone/heavy.sh`.
 

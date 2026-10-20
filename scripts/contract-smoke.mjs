@@ -10,6 +10,10 @@
 // Usage:
 //   BASE_URL=http://localhost:3000 node scripts/contract-smoke.mjs      (or: npm run test:contract)
 //
+// CI: this repo's CI doesn't run it; the BE repo's `contract` job does, taking this file from FE
+// main. To test a change to it before merging, run the BE CI workflow by hand on the FE branch:
+//   gh workflow run ci.yml -R aviandri/asana-clone-be -f fe_ref=<branch>
+//
 // Env:
 //   BASE_URL        backend origin (default http://127.0.0.1:3000); the API is at $BASE_URL/api/v1
 //   ADMIN_EMAIL     default admin@example.com   ┐
@@ -994,9 +998,17 @@ async function contractV13Attachments({ aliceUser, bobUser, teamId }) {
 
     // ---- A12: at most 3 concurrent uploads per user ----
     const held = [0, 1, 2].map((i) => heldUpload(admin, T, `held-${i}.bin`));
-    await new Promise((r) => setTimeout(r, 1500)); // let the backend take the three slots
-    const fourth = await admin('POST', `/tasks/${T}/attachments`, form('fourth.txt', text));
+    // The backend takes a slot once it starts reading a held body, which on a slow runner can lag:
+    // until all three are held a 4th upload still succeeds, so delete it and try again (up to ~10 s).
+    let fourth;
+    for (const deadline = Date.now() + 10_000; ; ) {
+      await new Promise((r) => setTimeout(r, 250));
+      fourth = await admin('POST', `/tasks/${T}/attachments`, form('fourth.txt', text));
+      if (fourth.status !== 201 || Date.now() > deadline) break;
+      await admin('DELETE', `/attachments/${fourth.body.id}`);
+    }
     same('4th concurrent upload → 429 RATE_LIMITED (A12)', [fourth.status, code(fourth)], [429, 'RATE_LIMITED']);
+    if (fourth.status === 201) await admin('DELETE', `/attachments/${fourth.body.id}`);
     held.forEach((h) => h.release());
     const heldDone = await Promise.all(held.map((h) => h.done));
     same('the three held uploads then finish → 201', heldDone.map((r) => r.status), [201, 201, 201]);

@@ -13,12 +13,17 @@ import { AuthLayout } from '@/pages/AuthLayout';
 import { ROLE_LABEL } from '@/workspace/settings/roles';
 import { isFramed, isSafeRedirect, leave } from './leave';
 
-type Gone = 'expired' | 'decided' | 'invalid';
+type Gone = 'expired' | 'gone' | 'decided' | 'invalid';
 
 const GONE_COPY: Record<Gone, { title: string; body: string }> = {
   expired: {
     title: 'This request has expired',
     body: 'Connection requests are valid for 10 minutes. Go back to the app you were connecting and try again.',
+  },
+  // 410 from the server: expired, or already decided (M30).
+  gone: {
+    title: 'This request has expired or was already used',
+    body: 'Go back to the app you were connecting. If it isn’t connected, start again from there.',
   },
   decided: {
     title: 'This request was already answered',
@@ -32,7 +37,7 @@ const GONE_COPY: Record<Gone, { title: string; body: string }> = {
 
 function goneFrom(err: unknown): Gone | null {
   if (!(err instanceof ApiError)) return null;
-  if (err.status === 410) return 'expired';
+  if (err.status === 410) return 'gone';
   if (err.status === 409) return 'decided';
   if (err.status === 404) return 'invalid';
   return null;

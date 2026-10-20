@@ -15,12 +15,18 @@ const isLoopback = (uri: string) => {
   return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1');
 };
 
-/** 404 unknown, 410 expired, 409 already decided (M7). */
-function pending(db: MockDb, id: string): OAuthRequestRow {
+/**
+ * 404 unknown, 410 expired (M7). Already decided: 410 when reading it (M30), 409 only for a second
+ * decision.
+ */
+function pending(db: MockDb, id: string, deciding = false): OAuthRequestRow {
   const r = table(db).find((x) => x.id === id);
   if (!r) throw notFound();
   if (new Date(r.expiresAt) <= new Date()) throw new HttpError(410, 'GONE', 'This request has expired');
-  if (r.decidedAt) throw new HttpError(409, 'CONFLICT', 'This request has already been decided');
+  if (r.decidedAt) {
+    if (deciding) throw new HttpError(409, 'CONFLICT', 'This request has already been decided');
+    throw new HttpError(410, 'GONE', 'This request has already been used');
+  }
   return r;
 }
 
@@ -44,7 +50,7 @@ export const oauthRoutes: [string, string, Handler][] = [
     'POST',
     '/oauth/requests/:id/decision',
     ({ db, me, params, body }) => {
-      const r = pending(db, params.id);
+      const r = pending(db, params.id, true);
       if (typeof body?.approve !== 'boolean') throw invalid('approve: must be a boolean');
       const scope = body.scope ?? (r.scope === 'read' ? 'READ' : 'WRITE');
       if (scope !== 'READ' && scope !== 'WRITE') throw invalid('scope: must be READ or WRITE');

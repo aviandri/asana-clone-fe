@@ -76,3 +76,18 @@ Fast, friendly, never in the way (Slack as the reference). `motion` via `LazyMot
 Rules: 120–220ms, ease-out in / ease-in out, springs for panels and drops, transform/opacity only,
 list stagger ≤ 10 items × 20ms, nothing blocks input. `prefers-reduced-motion`: fades only — no
 movement, no celebrations, count-ups jump. Celebrations can be turned off in **My profile**.
+
+## Container settings (deploy/)
+
+The image serves the SPA with nginx on port 80 and proxies `/api/`, `/health`, `/mcp`, `/oauth/` and
+`/.well-known/oauth-*` to the backend. Environment:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `BACKEND_URL` | `http://be:3000` | Backend origin, no path. `http://` to an in-cluster service name is best; an `https://` ingress URL also works (SNI is sent). |
+| `BACKEND_HOST` | `$proxy_host` | Host header sent to the backend. The default (the host in `BACKEND_URL`) is what an ingress in front of the backend routes on. |
+| `REAL_IP_FROM` | unset | Space- or comma-separated CIDRs of the proxies in front of this container (ingress, load balancer). Restores the client address so the backend's per-client rate limits work. Never `0.0.0.0/0`. |
+| `REAL_IP_HEADER` | `X-Forwarded-For` | Header to take the client address from when `REAL_IP_FROM` is set (e.g. `CF-Connecting-IP`). |
+
+Deploying on Mekari OneDeploy: see `deploy/ONEDEPLOY.md` in the backend repo. `main` is mirrored to
+Bitbucket by `.github/workflows/mirror-bitbucket.yml` once CI passes.

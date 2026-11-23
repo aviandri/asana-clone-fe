@@ -1,5 +1,5 @@
-# Rendered by the nginx image's envsubst step (/etc/nginx/templates) — ${BACKEND_URL} and ${BACKEND_HOST}
-# are substituted (defaults in the Dockerfile).
+# Rendered by the nginx image's envsubst step (/etc/nginx/templates) — only ${BACKEND_URL} is substituted,
+# so this template also works mounted into a stock nginx image (the BE repo's CI does that).
 server {
     listen 80;
     server_name _;
@@ -16,8 +16,8 @@ server {
     # bucket. Set REAL_IP_FROM to the proxy's CIDR(s) and the image restores the client address at the
     # http level (deploy/15-real-ip.sh writes conf.d/00-real-ip.conf). Never 0.0.0.0/0.
 
-    # BACKEND_URL may be https (e.g. the backend's own ingress hostname): send SNI, and by default the
-    # upstream's own Host (BACKEND_HOST=$proxy_host), so an ingress routes it to the backend, not back here.
+    # BACKEND_URL may be https (e.g. the backend's own ingress hostname): send SNI, and the upstream's own
+    # Host ($proxy_host), so an ingress routes it to the backend, not back here. The BE doesn't read Host.
     proxy_ssl_server_name on;
 
     gzip on;
@@ -35,7 +35,7 @@ server {
         proxy_send_timeout 300s;
         proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
-        proxy_set_header Host ${BACKEND_HOST};
+        proxy_set_header Host $proxy_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -46,7 +46,7 @@ server {
         proxy_read_timeout 300s;
         proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
-        proxy_set_header Host ${BACKEND_HOST};
+        proxy_set_header Host $proxy_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -66,7 +66,7 @@ server {
         proxy_read_timeout 60s;
         proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
-        proxy_set_header Host ${BACKEND_HOST};
+        proxy_set_header Host $proxy_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -76,7 +76,7 @@ server {
     location /oauth/ {
         proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
-        proxy_set_header Host ${BACKEND_HOST};
+        proxy_set_header Host $proxy_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -86,7 +86,7 @@ server {
     location ^~ /.well-known/oauth- {
         proxy_pass ${BACKEND_URL};
         proxy_http_version 1.1;
-        proxy_set_header Host ${BACKEND_HOST};
+        proxy_set_header Host $proxy_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;

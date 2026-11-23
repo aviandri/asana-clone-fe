@@ -84,7 +84,7 @@ The image serves the SPA with nginx on port 80 and proxies `/api/`, `/health`, `
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `BACKEND_URL` | `http://be:3000` | Backend origin, no path. `http://` to an in-cluster service name is best; an `https://` ingress URL also works (SNI is sent). |
+| `BACKEND_URL` | `http://be:3000` | Backend origin, no path. `http://` to an in-cluster service name is best; an `https://` ingress URL also works (SNI is sent), but nginx resolves the hostname once at startup, so restart the frontend if the backend ingress IP changes. |
 | `BACKEND_HOST` | `$proxy_host` | Host header sent to the backend. The default (the host in `BACKEND_URL`) is what an ingress in front of the backend routes on. |
 | `REAL_IP_FROM` | unset | Space- or comma-separated CIDRs of the proxies in front of this container (ingress, load balancer). Restores the client address so the backend's per-client rate limits work. Never `0.0.0.0/0`. |
 | `REAL_IP_HEADER` | `X-Forwarded-For` | Header to take the client address from when `REAL_IP_FROM` is set (e.g. `CF-Connecting-IP`). |

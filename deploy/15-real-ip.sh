@@ -4,7 +4,7 @@
 # load balancer, Cloudflare). nginx then takes the client address from REAL_IP_HEADER (default
 # X-Forwarded-For, right-most untrusted hop), so the backend's per-client rate limits see real users.
 # Unset = trust nobody (direct exposure, e.g. docker-compose on a host port). Never 0.0.0.0/0.
-set -eu
+set -euf  # -f: no filename expansion of the CIDR list
 out=/etc/nginx/conf.d/00-real-ip.conf
 rm -f "$out"
 [ -n "${REAL_IP_FROM:-}" ] || exit 0
@@ -12,8 +12,12 @@ rm -f "$out"
   echo "# Generated from REAL_IP_FROM by 15-real-ip.sh"
   for cidr in $(printf '%s' "$REAL_IP_FROM" | tr ',' ' '); do
     case "$cidr" in
-      0.0.0.0/0|::/0) echo "15-real-ip.sh: refusing to trust $cidr" >&2; exit 1 ;;
-      *[!0-9a-fA-F.:/]*) echo "15-real-ip.sh: invalid CIDR '$cidr'" >&2; exit 1 ;;
+      *[!0-9a-fA-F.:/]*|*/*/*|/*|*/) echo "15-real-ip.sh: invalid CIDR '$cidr'" >&2; exit 1 ;;
+      */*)
+        # A /0 (any spelling: 0/0, 0.0.0.0/00, ::/0) trusts every client to pick its own address.
+        bits=${cidr#*/}
+        case "$bits" in *[!0-9]*|'') echo "15-real-ip.sh: invalid CIDR '$cidr'" >&2; exit 1 ;; esac
+        if [ "$bits" -eq 0 ]; then echo "15-real-ip.sh: refusing to trust $cidr" >&2; exit 1; fi ;;
     esac
     echo "set_real_ip_from $cidr;"
   done
